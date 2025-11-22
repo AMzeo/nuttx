@@ -363,6 +363,11 @@ struct sam_dev_s
   bool               widebus;         /* Required for DMA support */
   DMA_HANDLE         dma;             /* Handle for DMA channel */
 
+  /* FIX #4: Cached block parameters */
+
+  unsigned int       blocklen;        /* Block length for current transfer */
+  unsigned int       nblocks;         /* Number of blocks for current transfer */
+
   /* Debug stuff */
 
 #ifdef CONFIG_SAMV7_HSMCI_REGDEBUG
@@ -1397,19 +1402,31 @@ static void sam_endtransfer(struct sam_dev_s *priv,
 
 static void sam_notransfer(struct sam_dev_s *priv)
 {
-  uint32_t regval;
+  /* FIX #12: Guard against disabling DMA while transfer is active.
+   * If DMA is still running (dmabusy=true), do NOT touch the peripheral.
+   * The DMA callback will finish the job when the transfer completes.
+   * This prevents race conditions between XFRDONE/error interrupts and
+   * the DMA controller, which was causing the last microblock to get stuck.
+   */
+  if (priv->dmabusy)
+    {
+      mcerr("INFO: sam_notransfer called while DMA active - skipping (safe)\n");
+      return;
+    }
 
-  /* Make read/write proof (or not).  This is a legacy behavior: This really
-   * just needs be be done once at initialization time.
+  /* FIX #15: DO NOT clear WRPROOF/RDPROOF here.
+   * These bits are set by sam_blocksetup() before each transfer and should
+   * remain set. Microchip's official CSP driver sets them for every data
+   * transfer and never clears them. The old code was "legacy behavior" (as
+   * its own comment admitted) that contradicted Microchip's proven approach.
+   * REMOVED: 3 lines that cleared WRPROOF/RDPROOF
    */
 
-  regval  = sam_getreg(priv, SAM_HSMCI_MR_OFFSET);
-  regval &= ~(HSMCI_MR_RDPROOF | HSMCI_MR_WRPROOF);
-  sam_putreg(priv, regval, SAM_HSMCI_MR_OFFSET);
-
-  /* Clear the block size and count */
-
-  sam_putreg(priv, 0, SAM_HSMCI_BLKR_OFFSET);
+  /* FIX #2: DO NOT clear BLKR - values persist until next block setup
+   * Clearing BLKR creates race conditions where next transfer starts
+   * with BLKR=0 and times out. Matches Harmony and STM32 reference drivers.
+   * REMOVED: sam_putreg(priv, 0, SAM_HSMCI_BLKR_OFFSET);
+   */
 
   /* Clear transfer flags (DMA could still be active in a corner case) */
 
@@ -1694,9 +1711,9 @@ static void sam_reset(struct sdio_dev_s *dev)
 
   sam_putreg(priv, 0, SAM_HSMCI_DMA_OFFSET);
 
-  /* Configure MCI */
+  /* FIX #14: Remove LSYNC, add FERRCTRL (match Microchip) */
 
-  sam_putreg(priv, HSMCI_CFG_FIFOMODE, SAM_HSMCI_CFG_OFFSET);
+  sam_putreg(priv, HSMCI_CFG_FIFOMODE | HSMCI_CFG_FERRCTRL, SAM_HSMCI_CFG_OFFSET);
 
   /* No data transfer */
 
@@ -2100,6 +2117,11 @@ static void sam_blocksetup(struct sdio_dev_s *dev, unsigned int blocklen,
   regval = (blocklen << HSMCI_BLKR_BLKLEN_SHIFT) |
            (nblocks  << HSMCI_BLKR_BCNT_SHIFT);
   sam_putreg(priv, regval, SAM_HSMCI_BLKR_OFFSET);
+
+  /* FIX #4: Cache block parameters for use by DMA setup functions */
+
+  priv->blocklen = blocklen;
+  priv->nblocks  = nblocks;
 }
 
 /****************************************************************************
@@ -2945,7 +2967,6 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
   uint32_t regaddr;
   uint32_t memaddr;
-  uint32_t regval;
   unsigned int blocksize;
   unsigned int nblocks;
   unsigned int offset;
@@ -2968,15 +2989,25 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
 #endif
     }
 
-  /* How many blocks?  That should have been saved by the sam_blocksetup()
-   * method earlier.
+  /* FIX #1: Invalidate D-cache for DMA receive buffer
+   * CRITICAL: Must invalidate cache BEFORE DMA receive starts.
+   * This ensures the CPU reads fresh data from RAM (written by DMA)
+   * instead of stale data from the cache.
+   * Without this, file system corruption and read errors occur.
+   * Reference: STM32H7 driver stm32_dmarecvsetup()
    */
 
-  regval    = sam_getreg(priv, SAM_HSMCI_BLKR_OFFSET);
-  nblocks   = ((regval &  HSMCI_BLKR_BCNT_MASK) >>
-               HSMCI_BLKR_BCNT_SHIFT);
-  blocksize = ((regval &  HSMCI_BLKR_BLKLEN_MASK) >>
-               HSMCI_BLKR_BLKLEN_SHIFT);
+  up_invalidate_dcache((uintptr_t)buffer, (uintptr_t)buffer + buflen);
+
+  /* FIX #4: Use cached block parameters set by sam_blocksetup() earlier.
+   * DO NOT read hardware BLKR register - it may have been cleared.
+   * This matches STM32H7 pattern which uses cached blocksize directly.
+   */
+
+  blocksize = priv->blocklen;
+  nblocks   = priv->nblocks;
+
+  /* Sanity check - should never fail if blocksetup was called */
 
   DEBUGASSERT(nblocks > 0 && blocksize > 0 && (blocksize & 3) == 0);
 
@@ -2985,7 +3016,9 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
    * of the buffer in RAM.
    */
 
-  offset  = (nblocks == 1 ? SAM_HSMCI_RDR_OFFSET : SAM_HSMCI_FIFO_OFFSET);
+  /* FIX #13: Always use FIFO like Microchip's official driver */
+
+  offset  = SAM_HSMCI_FIFO_OFFSET;
   regaddr = hsmci_regaddr(priv, offset);
   memaddr = (uintptr_t)buffer;
 

@@ -794,6 +794,17 @@ static inline uint32_t sam_txcc(struct sam_xdmach_s *xdmach)
 
       regval |= XDMACH_CC_SWREQ;
 #endif
+
+      /* FIX #21: Force CSIZE and MBSIZE for HSMCI (match Microchip).
+       * DO NOT set SWREQ - HSMCI uses hardware handshaking!
+       */
+      if (pid == 0)  /* SAM_PID_HSMCI0 */
+        {
+          regval &= ~XDMACH_CC_CSIZE_MASK;
+          regval |= XDMACH_CC_CSIZE_1;
+          regval &= ~XDMACH_CC_MBSIZE_MASK;
+          regval |= XDMACH_CC_MBSIZE_1;
+        }
     }
 
   return regval;
@@ -953,6 +964,17 @@ static inline uint32_t sam_rxcc(struct sam_xdmach_s *xdmach)
 
       regval |= XDMACH_CC_SWREQ;
 #endif
+
+      /* FIX #21: Force CSIZE and MBSIZE for HSMCI (match Microchip).
+       * DO NOT set SWREQ - HSMCI uses hardware handshaking!
+       */
+      if (pid == 0)  /* SAM_PID_HSMCI0 */
+        {
+          regval &= ~XDMACH_CC_CSIZE_MASK;
+          regval |= XDMACH_CC_CSIZE_1;
+          regval &= ~XDMACH_CC_MBSIZE_MASK;
+          regval |= XDMACH_CC_MBSIZE_1;
+        }
     }
 
   return regval;
