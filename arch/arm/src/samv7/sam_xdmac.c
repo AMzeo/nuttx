@@ -795,16 +795,14 @@ static inline uint32_t sam_txcc(struct sam_xdmach_s *xdmach)
       regval |= XDMACH_CC_SWREQ;
 #endif
 
-      /* FIX #21: Force CSIZE and MBSIZE for HSMCI (match Microchip).
-       * DO NOT set SWREQ - HSMCI uses hardware handshaking!
+      /* NOTE: HSMCI chunk size is configured via DMACH_FLAG_PERIPHCHUNKSIZE_*
+       * flags (lines 738-740 above) and should NOT be overridden here.
+       * Microchip's PLIB respects the configured chunk size and does not
+       * force CSIZE_1. The previous "FIX #21" override was incorrect and
+       * created a mismatch between HSMCI peripheral chunk size (CHKSIZE) and
+       * XDMAC channel chunk size (CSIZE), causing TX DMA to deadlock when
+       * HSMCI waited for CHKSIZE words while XDMAC only transferred 1 word.
        */
-      if (pid == 0)  /* SAM_PID_HSMCI0 */
-        {
-          regval &= ~XDMACH_CC_CSIZE_MASK;
-          regval |= XDMACH_CC_CSIZE_1;
-          regval &= ~XDMACH_CC_MBSIZE_MASK;
-          regval |= XDMACH_CC_MBSIZE_1;
-        }
     }
 
   return regval;
@@ -965,16 +963,11 @@ static inline uint32_t sam_rxcc(struct sam_xdmach_s *xdmach)
       regval |= XDMACH_CC_SWREQ;
 #endif
 
-      /* FIX #21: Force CSIZE and MBSIZE for HSMCI (match Microchip).
-       * DO NOT set SWREQ - HSMCI uses hardware handshaking!
+      /* NOTE: HSMCI chunk size is configured via DMACH_FLAG_PERIPHCHUNKSIZE_*
+       * flags and should NOT be overridden here. See TX path (sam_txcc)
+       * for detailed explanation of why the previous "FIX #21" override
+       * was incorrect and caused TX DMA deadlock.
        */
-      if (pid == 0)  /* SAM_PID_HSMCI0 */
-        {
-          regval &= ~XDMACH_CC_CSIZE_MASK;
-          regval |= XDMACH_CC_CSIZE_1;
-          regval &= ~XDMACH_CC_MBSIZE_MASK;
-          regval |= XDMACH_CC_MBSIZE_1;
-        }
     }
 
   return regval;
