@@ -95,6 +95,13 @@
 
 #define MMCSD_CAPACITY(b, s)    ((s) >= 10 ? (b) << ((s) - 10) : (b) >> (10 - (s)))
 
+/* Debug: Enable verbose transfer debugging (read/write verification)
+ * Define MMCSD_DEBUG_TRANSFER to enable debug output for troubleshooting
+ * SD card read/write issues (cache coherency, DMA, data corruption, etc.)
+ */
+
+#undef MMCSD_DEBUG_TRANSFER  /* Disabled by default - define to enable */
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -1471,6 +1478,17 @@ static ssize_t mmcsd_readsingle(FAR struct mmcsd_state_s *priv,
       return ret;
     }
 
+  /* FIX: Invalidate cache after DMA RX to ensure CPU sees fresh data */
+#ifdef MMCSD_DEBUG_TRANSFER
+  printf("[RD] blk=%jd BEFORE inv: [%02x %02x %02x %02x]\n",
+         (intmax_t)startblock, buffer[0], buffer[1], buffer[2], buffer[3]);
+#endif
+  up_invalidate_dcache((uintptr_t)buffer, (uintptr_t)buffer + priv->blocksize);
+#ifdef MMCSD_DEBUG_TRANSFER
+  printf("[RD] blk=%jd AFTER inv:  [%02x %02x %02x %02x]\n",
+         (intmax_t)startblock, buffer[0], buffer[1], buffer[2], buffer[3]);
+#endif
+
   /* Return value:  One sector read */
 
   return 1;
@@ -1605,6 +1623,14 @@ static ssize_t mmcsd_readmultiple(FAR struct mmcsd_state_s *priv,
       return ret;
     }
 
+  /* FIX: Invalidate cache after DMA RX to ensure CPU sees fresh data */
+  up_invalidate_dcache((uintptr_t)buffer, (uintptr_t)buffer + nbytes);
+
+#ifdef MMCSD_DEBUG_TRANSFER
+  printf("[RDM] blk=%jd n=%zu buf=%p data=[%02x %02x %02x %02x]\n",
+         (intmax_t)startblock, nblocks, buffer, buffer[0], buffer[1], buffer[2], buffer[3]);
+#endif
+
   /* Send STOP_TRANSMISSION */
 
   ret = mmcsd_stoptransmission(priv);
@@ -1673,7 +1699,6 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_state_s *priv,
   ret = mmcsd_transferready(priv);
   if (ret != OK)
     {
-      ferr("ERROR: Card not ready: %d\n", ret);
       return ret;
     }
 
@@ -1697,7 +1722,6 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_state_s *priv,
   ret = mmcsd_setblocklen(priv, priv->blocksize);
   if (ret != OK)
     {
-      ferr("ERROR: mmcsd_setblocklen failed: %d\n", ret);
       return ret;
     }
 
@@ -1713,12 +1737,22 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_state_s *priv,
       ret = mmcsd_recv_r1(priv, MMCSD_CMD24);
       if (ret != OK)
         {
-          ferr("ERROR: mmcsd_recv_r1 for CMD24 failed: %d\n", ret);
+#ifdef MMCSD_DEBUG_TRANSFER
+          printf("[CMD24 FAIL] blk=%jd ret=%d\n", (intmax_t)startblock, ret);
+#endif
           return ret;
         }
+#ifdef MMCSD_DEBUG_TRANSFER
+      printf("[CMD24 OK] blk=%jd\n", (intmax_t)startblock);
+#endif
     }
 
   /* Configure SDIO controller hardware for the write transfer */
+
+#ifdef MMCSD_DEBUG_TRANSFER
+  printf("[WR] blk=%jd buf=%p data=[%02x %02x %02x %02x]\n",
+         (intmax_t)startblock, buffer, buffer[0], buffer[1], buffer[2], buffer[3]);
+#endif
 
   SDIO_BLOCKSETUP(priv->dev, priv->blocksize, 1);
   SDIO_WAITENABLE(priv->dev,
@@ -1731,7 +1765,6 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_state_s *priv,
       ret = SDIO_DMASENDSETUP(priv->dev, buffer, priv->blocksize);
       if (ret != OK)
         {
-          finfo("SDIO_DMASENDSETUP: error %d\n", ret);
           SDIO_CANCEL(priv->dev);
           return ret;
         }
@@ -1763,9 +1796,14 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_state_s *priv,
   ret = mmcsd_eventwait(priv, SDIOWAIT_TIMEOUT | SDIOWAIT_ERROR);
   if (ret != OK)
     {
-      ferr("ERROR: CMD24 transfer failed: %d\n", ret);
+#ifdef MMCSD_DEBUG_TRANSFER
+      printf("[EVENTWAIT FAIL] blk=%jd ret=%d\n", (intmax_t)startblock, ret);
+#endif
       return ret;
     }
+#ifdef MMCSD_DEBUG_TRANSFER
+  printf("[EVENTWAIT OK] blk=%jd\n", (intmax_t)startblock);
+#endif
 
   /* Flag that a write transfer is pending that we will have to check for
    * write complete at the beginning of the next transfer.
@@ -1778,6 +1816,45 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_state_s *priv,
 
   SDIO_WAITENABLE(priv->dev, SDIOWAIT_WRCOMPLETE | SDIOWAIT_TIMEOUT,
                   MMCSD_BLOCK_WDATADELAY);
+#endif
+
+#ifdef MMCSD_DEBUG_TRANSFER
+  /* FIX #45: Read-after-write verification to diagnose TX issues */
+  {
+    static uint8_t verify_buf[512] __attribute__((aligned(4)));
+    int verify_ret;
+
+    /* Wait for write to complete before reading back */
+    verify_ret = mmcsd_transferready(priv);
+    if (verify_ret != OK)
+      {
+        printf("[VERIFY] Wait for ready failed: %d\n", verify_ret);
+      }
+    else
+      {
+        /* Read back the sector */
+        verify_ret = mmcsd_readsingle(priv, verify_buf, startblock);
+        if (verify_ret != 1)
+          {
+            printf("[VERIFY] Read-back failed: %d\n", verify_ret);
+          }
+        else
+          {
+            /* Compare first 4 bytes */
+            if (memcmp(buffer, verify_buf, 4) != 0)
+              {
+                printf("[VERIFY FAIL] blk=%jd wrote=[%02x %02x %02x %02x] read=[%02x %02x %02x %02x]\n",
+                       (intmax_t)startblock,
+                       buffer[0], buffer[1], buffer[2], buffer[3],
+                       verify_buf[0], verify_buf[1], verify_buf[2], verify_buf[3]);
+              }
+            else
+              {
+                printf("[VERIFY OK] blk=%jd\n", (intmax_t)startblock);
+              }
+          }
+      }
+  }
 #endif
 
   /* On success, return the number of blocks written */

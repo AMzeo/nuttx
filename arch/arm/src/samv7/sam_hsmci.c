@@ -114,33 +114,22 @@
 #endif
 
 /* SAMV7 DMA Configuration:
- * - RX DMA: Enabled and working (Fix #1 cache invalidate + Fix #4 cached params + Fix #13 FIFO)
- * - TX DMA: DISABLED - fundamentally broken in NuttX SAMV7 implementation
+ * - RX DMA: Enabled with corrected cache invalidation in XDMAC driver
+ * - TX DMA: Enabled - testing FIX #35
  *
- * TX DMA Investigation Summary:
- * After exhaustive debugging (Fixes #1-#25), TX DMA persistently fails with
- * UNRE (underrun) errors despite applying all fixes from Microchip's reference:
- * - Fix #22: Removed XDMAC chunk size override that prevented synchronization
- * - Fix #23: Disabled WRPROOF/RDPROOF to avoid clock stalling
- * - Fix #24: Single DMA setup call matching Microchip CSP (no loop)
- * - Fix #25: 1-bit bus initialization per SD specification
- * - Plus all earlier fixes (#1-#21)
- *
- * Error Pattern: TX DMA always fails with SR: 04100004 (UNRE bit set),
- * indicating HSMCI FIFO was empty when trying to send data. This means
- * XDMAC never filled the FIFO, or filled it too slowly.
- *
- * NuttX History: TX DMA has been documented as broken since 2015:
- * "HSMCI TX DMA is currently disabled for the SAMV7. There is some issue
- *  with the TX DMA setup. This is a bug that needs to be resolved."
- *
- * Status: Non-DMA TX works reliably with Fix #4 (cached block params).
- * Performance impact: ~20-30% slower than DMA, acceptable for param storage
- * and logging. System is stable and functional.
+ * DMA Fixes Applied:
+ * - RX: Changed up_clean_dcache to up_invalidate_dcache in sam_xdmac.c
+ *       This ensures CPU reads fresh data from RAM after DMA writes.
+ * - TX: FIX #34 - Use FIFO for ALL transfers (single and multi-block)
+ *       Matches FreeRTOS which always uses FIFO[i] for SD card transfers.
+ * - TX: FIX #35 - Final cache flush RIGHT BEFORE sam_dmastart()
+ *       Matches FreeRTOS which calls SCB_CleanInvalidateDCache() immediately
+ *       before XDMAD_StartTransfer(). Ensures DMA descriptors and buffer
+ *       data are in RAM before DMA controller reads them.
  */
 
 #undef  HSCMI_NORXDMA              /* RX DMA enabled and working */
-#define HSCMI_NOTXDMA       1      /* TX DMA disabled - use non-DMA TX */
+#undef  HSCMI_NOTXDMA              /* TX DMA enabled - testing with FIX #46 (PA26 pin conflict resolved) */
 
 /* Timing */
 
@@ -149,7 +138,11 @@
 
 /* Big DTIMER setting */
 
-#define HSMCI_DTIMER_DATATIMEOUT (0x000fffff)
+/* Data timeout: Use maximum multiplier (1048576) with maximum cycle count (15)
+ * This provides ~15 million cycles timeout for slow SD card writes.
+ * The previous value with DTOCYC=2 was timing out during mkfatfs operations.
+ */
+#define HSMCI_DTIMER_DATATIMEOUT (HSMCI_DTOR_DTOMUL_1048576 | HSMCI_DTOR_DTOCYC_MAX)
 
 /* DMA configuration flags */
 
@@ -1424,16 +1417,27 @@ static void sam_endtransfer(struct sam_dev_s *priv,
 
 static void sam_notransfer(struct sam_dev_s *priv)
 {
-  /* FIX #12: Guard against disabling DMA while transfer is active.
-   * If DMA is still running (dmabusy=true), do NOT touch the peripheral.
-   * The DMA callback will finish the job when the transfer completes.
-   * This prevents race conditions between XFRDONE/error interrupts and
-   * the DMA controller, which was causing the last microblock to get stuck.
+  /* FIX #12 REVISED: Guard against touching hardware while DMA is active,
+   * BUT always update software state flags for completion tracking.
+   *
+   * CRITICAL BUG FIXED: The original FIX #12 had an early return that
+   * prevented xfrbusy/txbusy from being cleared when dmabusy was true.
+   * This caused a deadlock in the completion handshake:
+   *
+   *   1. XFRDONE fires before DMA completes
+   *   2. sam_endtransfer() calls sam_notransfer()
+   *   3. Old code: early return, xfrbusy stays TRUE
+   *   4. sam_endtransfer() checks !dmabusy (false) → no wake-up
+   *   5. DMA callback checks !xfrbusy (false, never cleared!) → no wake-up
+   *   6. Neither path wakes semaphore → ETIMEDOUT (errno 116)
+   *
+   * The fix: Always clear software flags, only guard hardware operations.
+   * Since FIX #15 and FIX #2 removed all hardware register writes from
+   * this function, the dmabusy guard is now just informational logging.
    */
   if (priv->dmabusy)
     {
-      mcerr("INFO: sam_notransfer called while DMA active - skipping (safe)\n");
-      return;
+      mcinfo("INFO: sam_notransfer called while DMA active - clearing flags only\n");
     }
 
   /* FIX #15: DO NOT clear WRPROOF/RDPROOF here.
@@ -1450,7 +1454,10 @@ static void sam_notransfer(struct sam_dev_s *priv)
    * REMOVED: sam_putreg(priv, 0, SAM_HSMCI_BLKR_OFFSET);
    */
 
-  /* Clear transfer flags (DMA could still be active in a corner case) */
+  /* ALWAYS clear transfer flags - critical for completion handshake.
+   * This allows sam_dmacallback() to detect that XFRDONE has already
+   * fired and wake the waiting thread.
+   */
 
   priv->xfrbusy = false;
   priv->txbusy  = false;
@@ -1716,6 +1723,17 @@ static void sam_reset(struct sdio_dev_s *dev)
   sam_putreg(priv, HSMCI_DTOR_DTOCYC_MAX | HSMCI_DTOR_DTOMUL_MAX,
              SAM_HSMCI_DTOR_OFFSET);
 
+  /* FIX #40: Set Completion Signal Timeout Register to match Harmony.
+   *
+   * Harmony sets: HSMCI_CSTOR_CSTOMUL_1048576 | HSMCI_CSTOR_CSTOCYC(2U)
+   * This provides ~2 million cycles for completion signal timeout.
+   * NuttX was not setting this at all, leaving it at reset default (0).
+   * This may have been causing completion timeout issues during writes.
+   */
+
+  sam_putreg(priv, HSMCI_CSTOR_CSTOMUL_1048576 | HSMCI_CSTOR_CSTOCYC(2),
+             SAM_HSMCI_CSTOR_OFFSET);
+
   /* Set the Mode Register for ID mode frequency (probably 400KHz) */
 
   sam_clock(dev, CLOCK_IDMODE);
@@ -1748,15 +1766,32 @@ static void sam_reset(struct sdio_dev_s *dev)
   sam_putreg(priv, HSMCI_SDCR_SDCSEL_SLOTA | HSMCI_SDCR_SDCBUS_1BIT,
              SAM_HSMCI_SDCR_OFFSET);
 
-  /* Enable the MCI controller */
+  /* FIX #40 (continued): Enable the MCI controller with Power Saving.
+   *
+   * Harmony enables both MCIEN and PWSEN:
+   *   HSMCI_REGS->HSMCI_CR = HSMCI_CR_MCIEN_Msk | HSMCI_CR_PWSEN_Msk;
+   *
+   * PWSEN enables automatic power saving mode when idle.
+   */
 
-  sam_putreg(priv, HSMCI_CR_MCIEN, SAM_HSMCI_CR_OFFSET);
+  sam_putreg(priv, HSMCI_CR_MCIEN | HSMCI_CR_PWSEN, SAM_HSMCI_CR_OFFSET);
 
   /* Disable the DMA interface */
 
   sam_putreg(priv, 0, SAM_HSMCI_DMA_OFFSET);
 
-  /* FIX #14: Remove LSYNC, add FERRCTRL (match Microchip) */
+  /* FIX #40 (continued): Configure FIFOMODE and FERRCTRL to match Harmony.
+   *
+   * Harmony sets: HSMCI_CFG_FIFOMODE_Msk | HSMCI_CFG_FERRCTRL_Msk
+   *
+   * FIFOMODE: Controls the data flow in the FIFO (needed for DMA).
+   * FERRCTRL: Flow Error flag reset control mode.
+   *   When 0: Any read of SR clears flow error bits (could cause races)
+   *   When 1: Only software reset clears flow error bits (more predictable)
+   *
+   * The old comment said FERRCTRL "may cause hangs" but Harmony uses it
+   * and works correctly. Testing with it enabled per Harmony's approach.
+   */
 
   sam_putreg(priv, HSMCI_CFG_FIFOMODE | HSMCI_CFG_FERRCTRL, SAM_HSMCI_CFG_OFFSET);
 
@@ -1802,6 +1837,24 @@ static sdio_capset_t sam_capabilities(struct sdio_dev_s *dev)
 
 #ifdef CONFIG_SAMV7_HSMCI_DMA
   caps |= SDIO_CAPS_DMASUPPORTED;
+
+#ifndef HSCMI_NOTXDMA
+  /* FIX #33: Only set DMABEFOREWRITE when TX DMA is enabled.
+   *
+   * HSMCI requires BLKR to be programmed BEFORE the command with TRCMD_START
+   * is sent. For DMA TX, this flag ensures the sequence:
+   *   BLOCKSETUP -> DMASENDSETUP -> CMD24
+   *
+   * But when TX DMA is disabled (HSCMI_NOTXDMA), sam_sendsetup is used which
+   * actually PERFORMS the transfer (writes data in a polling loop), not just
+   * setup. With DMABEFOREWRITE set, sam_sendsetup is called BEFORE CMD24,
+   * causing immediate UNRE (underrun) because HSMCI hasn't started the transfer.
+   *
+   * Without this flag, the sequence becomes:
+   *   CMD24 -> SENDSETUP (which now works because HSMCI is waiting for data)
+   */
+  caps |= SDIO_CAPS_DMABEFOREWRITE;
+#endif
 #endif
 
   return caps;
@@ -2320,8 +2373,21 @@ static int sam_sendsetup(struct sdio_dev_s *dev,
   sched_lock();
   flags = enter_critical_section();
 
+  /* FIX #32: Clear stale error bits by reading SR before starting transfer.
+   * UNRE and other error bits are sticky and will cause immediate failure
+   * if not cleared from previous failed transfers.
+   */
+
+  (void)sam_getreg(priv, SAM_HSMCI_SR_OFFSET);
+
   src       = (const uint32_t *)buffer;
   remaining = buflen;
+
+  /* Debug: print first few words being sent */
+  printf("[POLL DATA] src=%p first4: %08lx %08lx %08lx %08lx\n",
+         buffer,
+         (unsigned long)src[0], (unsigned long)src[1],
+         (unsigned long)src[2], (unsigned long)src[3]);
 
   while (remaining > 0)
     {
@@ -2330,9 +2396,14 @@ static int sam_sendsetup(struct sdio_dev_s *dev,
       sr = sam_getreg(priv, SAM_HSMCI_SR_OFFSET);
       if ((sr & HSMCI_DATA_DMASEND_ERRORS) != 0)
         {
-          /* Some fatal error has occurred */
+          /* Some fatal error has occurred - decode error bits */
 
-          mcerr("ERROR: sr %08" PRIx32 "\n", sr);
+          printf("[TX ERR] SR=0x%08lx remaining=%u UNRE=%d CSTOE=%d DTOE=%d DCRCE=%d\n",
+                 (unsigned long)sr, remaining,
+                 !!(sr & HSMCI_INT_UNRE),
+                 !!(sr & HSMCI_INT_CSTOE),
+                 !!(sr & HSMCI_INT_DTOE),
+                 !!(sr & HSMCI_INT_DCRCE));
           leave_critical_section(flags);
           sched_unlock();
           return -EIO;
@@ -2393,6 +2464,8 @@ static int sam_sendsetup(struct sdio_dev_s *dev,
 
   leave_critical_section(flags);
   sched_unlock();
+
+  printf("[POLL TX] Complete: sent %u bytes from %p\n", (unsigned)buflen, buffer);
   return OK;
 }
 
@@ -3030,11 +3103,6 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
   uint32_t regaddr;
-  uint32_t memaddr;
-  unsigned int blocksize;
-  unsigned int nblocks;
-  unsigned int offset;
-  unsigned int i;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
 
@@ -3053,57 +3121,48 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
 #endif
     }
 
-  /* FIX #1: Invalidate D-cache for DMA receive buffer
-   * CRITICAL: Must invalidate cache BEFORE DMA receive starts.
-   * This ensures the CPU reads fresh data from RAM (written by DMA)
-   * instead of stale data from the cache.
-   * Without this, file system corruption and read errors occur.
-   * Reference: STM32H7 driver stm32_dmarecvsetup()
+  /* FIX #39: OPTION A - Match Harmony's working implementation for RX.
+   *
+   * See SAMV7_HSMCI_DMA_FIX.md for full analysis.
+   *
+   * Key changes from previous NuttX approach:
+   * 1. Single DMA transfer for entire buffer (no linked-list descriptors)
+   * 2. Fixed FIFO base address (HSMCI handles FIFO pointer internally)
+   * 3. Address-based cache invalidate (not full cache flush)
+   * 4. DMB barrier before DMA enable (handled in sam_xdmac.c FIX #38)
+   *
+   * Harmony reference (plib_hsmci.c:232-237):
+   *   XDMAC_ChannelTransfer(channel, hsmciFifoBaseAddress, buffer, numBytes/4);
+   *
+   * For RX (peripheral to memory), we invalidate the buffer cache to ensure
+   * CPU reads fresh DMA data, not stale cached values.
+   */
+
+  /* Step 1: Invalidate cache for the receive buffer.
+   * Harmony does: SYS_CACHE_InvalidateDCache_by_Addr(buffer, size);
+   * This ensures CPU will read fresh data from RAM after DMA completes.
    */
 
   up_invalidate_dcache((uintptr_t)buffer, (uintptr_t)buffer + buflen);
 
-  /* FIX #4: Use cached block parameters set by sam_blocksetup() earlier.
-   * DO NOT read hardware BLKR register - it may have been cleared.
-   * This matches STM32H7 pattern which uses cached blocksize directly.
-   */
+  /* Step 2: Data Memory Barrier */
 
-  blocksize = priv->blocklen;
-  nblocks   = priv->nblocks;
+  __asm__ __volatile__ ("dmb" ::: "memory");
 
-  /* Sanity check - should never fail if blocksetup was called */
-
-  DEBUGASSERT(nblocks > 0 && blocksize > 0 && (blocksize & 3) == 0);
-
-  /* Physical address of the HSCMI source register, either the TDR (for
-   * single transfers) or the first FIFO register, and the physical address
-   * of the buffer in RAM.
-   */
-
-  /* FIX #13: Always use FIFO like Microchip's official driver */
-
-  offset  = SAM_HSMCI_FIFO_OFFSET;
-  regaddr = hsmci_regaddr(priv, offset);
-  memaddr = (uintptr_t)buffer;
-
-  /* Setup register sampling (only works for the case of nblocks == 1) */
+  /* Setup register sampling */
 
   sam_xfrsampleinit(priv);
   sam_xfrsample(priv, SAMPLENDX_BEFORE_SETUP);
 
-  /* Set DMA for each block */
+  /* Step 3: Single DMA transfer from FIXED FIFO base address.
+   *
+   * Unlike previous approach that created separate descriptors per block
+   * with indexed FIFO addresses, Harmony uses a single transfer from
+   * the fixed FIFO base address (0x200).
+   */
 
-  for (i = 0; i < nblocks; i++)
-    {
-      /* Configure the RX DMA */
-
-      sam_dmarxsetup(priv->dma, regaddr, memaddr, buflen);
-
-      /* Update addresses for the next block */
-
-      regaddr += sizeof(uint32_t);
-      memaddr += blocksize;
-    }
+  regaddr = hsmci_regaddr(priv, SAM_HSMCI_FIFO_OFFSET);
+  sam_dmarxsetup(priv->dma, regaddr, (uintptr_t)buffer, buflen);
 
   /* Enable DMA handshaking */
 
@@ -3111,7 +3170,11 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
              HSMCI_DMA_DMAEN | HSMCI_DMA_CHKSIZE, SAM_HSMCI_DMA_OFFSET);
   sam_xfrsample(priv, SAMPLENDX_BEFORE_ENABLE);
 
-  /* Start the DMA */
+  /* Step 4: Start the DMA.
+   * With single descriptor, sam_dmastart() will call sam_single()
+   * which programs DMA registers directly - no linked-list complexity.
+   * DMB before channel enable is handled by FIX #38 in sam_xdmac.c.
+   */
 
   priv->dmabusy = true;
   priv->xfrbusy = true;
@@ -3120,7 +3183,7 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
 
   /* Configure transfer-related interrupts.  Transfer interrupts are not
    * enabled until after the transfer is started with an SD command (i.e.,
-   * at the beginning of sam_eventwait().
+   * at the beginning of sam_eventwait()).
    */
 
   sam_xfrsample(priv, SAMPLENDX_AFTER_SETUP);
@@ -3154,11 +3217,6 @@ static int sam_dmasendsetup(struct sdio_dev_s *dev,
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
   uint32_t regaddr;
-  uint32_t memaddr;
-  unsigned int blocksize;
-  unsigned int nblocks;
-  unsigned int offset;
-  unsigned int i;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
 
@@ -3177,80 +3235,69 @@ static int sam_dmasendsetup(struct sdio_dev_s *dev,
 #endif
     }
 
-  /* FIX #1 (TX path): Cache flush handled by sam_dmatxsetup() in sam_xdmac.c.
-   * NOTE: We do NOT call up_clean_dcache() here to avoid double-flushing.
-   * sam_dmatxsetup() already calls up_clean_dcache() at line 1873.
-   * Unlike RX which does invalidate here + clean in sam_xdmac, TX should
-   * only clean once in sam_xdmac to match the working pattern.
-   */
-
-  /* Cache flush done by sam_dmatxsetup() - no explicit flush needed here */
-
-  /* FIX #4: Use cached block parameters set by sam_blocksetup() earlier.
-   * DO NOT read hardware BLKR register - it may have been cleared.
-   * This matches the sam_dmarecvsetup() pattern and reduces overhead
-   * on the write path, critical for sustained writes (logger).
-   * Identified by Gemini as incomplete fix - send path now consistent.
-   */
-
-  blocksize = priv->blocklen;
-  nblocks   = priv->nblocks;
-
-  /* Sanity check - should never fail if blocksetup was called */
-
-  DEBUGASSERT(nblocks > 0 && blocksize > 0 && (blocksize & 3) == 0);
-
-  /* Physical address of the HSCMI destination register and the physical
-   * address of the buffer in RAM.
-   */
-
-  /* FIX #7: Always use FIFO for TX DMA, matching RX path (Fix #13).
-   * ROOT CAUSE IDENTIFIED: TDR is designed for single-word CPU writes,
-   * NOT for DMA block transfers. When DMA attempts to write a block to TDR,
-   * the register doesn't signal readiness after the first word, causing
-   * DMA to stall and timeout (ETIMEDOUT -116).
+  /* FIX #37: OPTION A - Match Harmony's working implementation EXACTLY.
    *
-   * FIFO is designed to handle ALL DMA transfers (single and multi-block).
-   * This matches Microchip's official driver behavior and the working RX path.
+   * See SAMV7_HSMCI_DMA_FIX.md for full analysis.
    *
-   * Previous incorrect approach: Conditional TDR/FIFO selection caused timeouts.
-   * Correct approach: Always use FIFO, just like RX path.
+   * Key changes from previous NuttX approach:
+   * 1. Single DMA transfer for entire buffer (no linked-list descriptors)
+   * 2. Fixed FIFO base address (HSMCI handles FIFO pointer internally)
+   * 3. Single cache clean before DMA setup
+   * 4. DMB barrier before DMA enable
+   *
+   * Harmony reference (plib_hsmci.c:254-259):
+   *   XDMAC_ChannelTransfer(channel, buffer, hsmciFifoBaseAddress, numBytes/4);
+   *
+   * This approach is simpler and proven to work on the same SAMV71-XULT board.
    */
 
-  offset  = SAM_HSMCI_FIFO_OFFSET;
-  regaddr = hsmci_regaddr(priv, offset);
-  memaddr = (uintptr_t)buffer;
+  /* FIX #43: Match Harmony's EXACT order of operations.
+   *
+   * Harmony's HSMCI_DmaSetup does:
+   *   1. HSMCI_REGS->HSMCI_DMA = HSMCI_DMA_DMAEN_Msk;  // Enable HSMCI DMA FIRST
+   *   2. XDMAC_ChannelDisable(channel);                // Then disable XDMAC
+   *   3. XDMAC_ChannelSettingsSet(...);                // Configure channel
+   *   4. XDMAC_ChannelTransfer(...);                   // Start transfer
+   *
+   * Previous NuttX order was different - we enabled HSMCI_DMA AFTER setup.
+   * FIX #41 confirmed cache is NOT the issue.
+   * FIX #42 (stopping DMA first) didn't help.
+   * Now trying Harmony's exact order.
+   */
 
-  /* Setup register sampling (only works for the case of nblocks == 1) */
+  /* Step 1: Enable HSMCI DMA FIRST (before anything else) */
+
+  sam_putreg(priv,
+             HSMCI_DMA_DMAEN | HSMCI_DMA_CHKSIZE, SAM_HSMCI_DMA_OFFSET);
+
+  /* Step 2: Stop any previous DMA transfer */
+
+  sam_dmastop(priv->dma);
+
+  /* Step 3: Clean cache to push buffer data to RAM before DMA reads it. */
+
+  up_clean_dcache((uintptr_t)buffer, (uintptr_t)buffer + buflen);
+
+  /* Step 4: Data Memory Barrier - ensures cache clean completes. */
+
+  __asm__ __volatile__ ("dmb" ::: "memory");
+
+  /* Setup register sampling */
 
   sam_xfrsampleinit(priv);
   sam_xfrsample(priv, SAMPLENDX_BEFORE_SETUP);
 
-  /* FIX #24: Single DMA setup call matching Microchip's approach.
-   *
-   * CRITICAL DIFFERENCE FOUND: Microchip's CSP calls ChannelTransfer() ONCE
-   * with the total transfer size, not in a loop. The loop structure used by
-   * RX works for reads but causes TX DMA to fail.
-   *
-   * ROOT CAUSE: Calling sam_dmatxsetup() in a loop may be creating linked
-   * DMA descriptors incorrectly for TX, or the XDMAC channel gets confused
-   * by multiple setup calls for the same transfer.
-   *
-   * SOLUTION: Call sam_dmatxsetup() ONCE with total buflen, matching:
-   * - Microchip CSP: Single ChannelTransfer() call
-   * - Non-DMA TX: Works because no DMA descriptor complexity
-   * - This avoids any linked-list or multi-descriptor issues
-   */
+  /* Step 5: Single DMA transfer to FIXED FIFO base address. */
 
-  sam_dmatxsetup(priv->dma, regaddr, memaddr, buflen);
+  regaddr = hsmci_regaddr(priv, SAM_HSMCI_FIFO_OFFSET);
+  sam_dmatxsetup(priv->dma, regaddr, (uintptr_t)buffer, buflen);
 
-  /* Enable DMA handshaking */
-
-  sam_putreg(priv,
-             HSMCI_DMA_DMAEN | HSMCI_DMA_CHKSIZE, SAM_HSMCI_DMA_OFFSET);
   sam_xfrsample(priv, SAMPLENDX_BEFORE_ENABLE);
 
-  /* Start the DMA */
+  /* Step 4: Start the DMA.
+   * With single descriptor, sam_dmastart() will call sam_single()
+   * which programs DMA registers directly - no linked-list complexity.
+   */
 
   priv->dmabusy = true;
   priv->xfrbusy = true;
@@ -3258,8 +3305,8 @@ static int sam_dmasendsetup(struct sdio_dev_s *dev,
   sam_dmastart(priv->dma, sam_dmacallback, priv);
 
   /* Configure transfer-related interrupts.  Transfer interrupts are not
-   * enabled until after the transfer is start with an SD command (i.e.,
-   * at the beginning of sam_eventwait().
+   * enabled until after the transfer is started with an SD command (i.e.,
+   * at the beginning of sam_eventwait()).
    */
 
   sam_xfrsample(priv, SAMPLENDX_AFTER_SETUP);

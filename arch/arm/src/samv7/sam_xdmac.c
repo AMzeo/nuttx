@@ -1311,6 +1311,19 @@ static inline int sam_single(struct sam_xdmach_s *xdmach)
    *    be set in the GS register by hardware.
    */
 
+  /* FIX #38: Add DMB before channel enable to match Harmony.
+   *
+   * Harmony's XDMAC_ChannelTransfer() does:
+   *   __DMB();
+   *   XDMAC_REGS->XDMAC_GE = ...;
+   *
+   * This ensures all register writes (CSA, CDA, CUBC, CC, etc.) are
+   * visible to the DMA controller before the channel is enabled.
+   * Without this barrier, the DMA might start with stale register values.
+   */
+
+  __asm__ __volatile__ ("dmb" ::: "memory");
+
   sam_putdmac(xdmac, XDMAC_CHAN(xdmach->chan), SAM_XDMAC_GE_OFFSET);
 
   /* 10. The DMA has been started. Once completed, the DMA channel sets the
@@ -1409,7 +1422,7 @@ static inline int sam_multiple(struct sam_xdmach_s *xdmach)
    */
 
   if ((xdmach->cc & XDMACH_CC_TYPE) == 0 ||
-      (xdmach->cc & XDMACH_CC_TYPE) == 0)
+      (xdmach->cc & XDMACH_CC_DSYNC) == 0)
     {
       regval |= XDMACH_CNDC_NDDUP;
     }
@@ -1433,6 +1446,10 @@ static inline int sam_multiple(struct sam_xdmach_s *xdmach)
    *    XDMAC Global Channel Enable (GE) Register.  The channel bit will
    *    be set in the GS register by hardware.
    */
+
+  /* FIX #38: Add DMB before channel enable (sam_multiple path) */
+
+  __asm__ __volatile__ ("dmb" ::: "memory");
 
   sam_putdmac(xdmac, XDMAC_CHAN(xdmach->chan), SAM_XDMAC_GE_OFFSET);
 
@@ -1945,9 +1962,16 @@ int sam_dmarxsetup(DMA_HANDLE handle, uint32_t paddr, uint32_t maddr,
   xdmach->rxsize = (xdmach->flags & DMACH_FLAG_MEMINCREMENT) != 0 ?
                     nbytes : sizeof(uint32_t);
 
-  /* Clean caches associated with the DMA memory */
+  /* Invalidate caches associated with the DMA memory.
+   * CRITICAL FIX: For RX DMA (peripheral -> memory), we must INVALIDATE
+   * the cache, not clean it. Invalidate forces the CPU to discard cached
+   * data and read fresh data from RAM after DMA writes there.
+   * Using clean (write-back) keeps cache lines valid, causing the CPU to
+   * read stale cached data instead of new DMA-written data.
+   * Reference: FreeRTOS uses SCB_CleanInvalidateDCache() before DMA.
+   */
 
-  up_clean_dcache(maddr, maddr + nbytes);
+  up_invalidate_dcache(maddr, maddr + nbytes);
   return ret;
 }
 
@@ -2069,6 +2093,10 @@ int sam_dmastart_circular(DMA_HANDLE handle, dma_callback_t callback,
   /* Enable channel */
 
   sam_putdmac(xdmac, XDMAC_CHAN(xdmach->chan), SAM_XDMAC_GIE_OFFSET);
+
+  /* FIX #38: Add DMB before channel enable (circular DMA path) */
+
+  __asm__ __volatile__ ("dmb" ::: "memory");
 
   sam_putdmac(xdmac, XDMAC_CHAN(xdmach->chan), SAM_XDMAC_GE_OFFSET);
 
