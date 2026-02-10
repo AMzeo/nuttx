@@ -372,6 +372,16 @@
 #  error "Unknown SAMV7 chip type"
 #endif
 
+/* When QSPI SPI compatibility mode is enabled on a chip with full QSPI
+ * (SAMV7_NQSPI > 0 but SAMV7_NQSPI_SPI not defined), provide the
+ * SAMV7_NQSPI_SPI count that sam_qspi_spi.c expects.
+ */
+
+#if defined(CONFIG_SAMV7_QSPI_SPI_MODE) && !defined(SAMV7_NQSPI_SPI) && \
+    defined(SAMV7_NQSPI) && SAMV7_NQSPI > 0
+#  define SAMV7_NQSPI_SPI  SAMV7_NQSPI
+#endif
+
 /* NVIC priority levels *****************************************************/
 
 /* Each priority field holds a priority value, 0-15. The lower the value, the

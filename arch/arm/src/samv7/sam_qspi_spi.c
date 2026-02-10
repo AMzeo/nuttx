@@ -289,7 +289,63 @@ static void qspi_spi_select(struct spi_dev_s *dev, uint32_t devid,
 {
   struct sam_spidev_s *spi = &g_spidev;
 
-  /* QSPI has just one CS so there is no need to perform any operation */
+  if (selected)
+    {
+      /* Suppress LASTXFER in exchange() while CS is asserted so that
+       * individual SPI_SEND calls within a SELECT..DESELECT session
+       * do not deassert CS between bytes.
+       */
+
+      spi->escape_lastxfer = true;
+    }
+  else
+    {
+      /* Deassert CS by briefly disabling/re-enabling the QSPI module.
+       *
+       * In CSMODE_LASTXFER, LASTXFER only takes effect during an
+       * active transfer. After the last real byte completes, writing
+       * LASTXFER to CR is a no-op — CS stays asserted.
+       *
+       * We cannot send a dummy byte to create a transfer because SPI
+       * flash commands like WREN (0x06) require CS to rise immediately
+       * after the command byte. A trailing dummy byte would invalidate
+       * the Write Enable Latch, causing all erase/write operations to
+       * silently fail.
+       *
+       * Instead, we disable the QSPI module (QSPIDIS), which forces
+       * CS high after any in-flight transfer completes, then re-enable
+       * (QSPIEN). MR and SCR settings are preserved across the cycle
+       * (only SWRST resets configuration registers).
+       */
+
+      spi->escape_lastxfer = false;
+
+      {
+          volatile int timeout;
+
+          /* Wait for any in-flight transfer to complete */
+
+          timeout = 10000;
+          while ((qspi_getreg(spi, SAM_QSPI_SR_OFFSET) &
+                  QSPI_INT_TXEMPTY) == 0 && --timeout > 0);
+
+          /* Disable QSPI — CS goes high after transfer completion */
+
+          qspi_putreg(spi, QSPI_CR_QSPIDIS, SAM_QSPI_CR_OFFSET);
+
+          timeout = 10000;
+          while ((qspi_getreg(spi, SAM_QSPI_SR_OFFSET) &
+                  QSPI_SR_QSPIENS) != 0 && --timeout > 0);
+
+          /* Re-enable QSPI (MR/SCR preserved, CS starts deasserted) */
+
+          qspi_putreg(spi, QSPI_CR_QSPIEN, SAM_QSPI_CR_OFFSET);
+
+          timeout = 10000;
+          while ((qspi_getreg(spi, SAM_QSPI_SR_OFFSET) &
+                  QSPI_SR_QSPIENS) == 0 && --timeout > 0);
+        }
+    }
 
   spi->select(devid, selected);
 }
@@ -663,6 +719,17 @@ static void qspi_spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
 
       qspi_putreg(spi, data, SAM_QSPI_TDR_OFFSET);
 
+      /* With CSMODE_LASTXFER, set LASTXFER on the last byte so that CS
+       * deasserts after this transfer completes.  Skip if escape_lastxfer
+       * is set (CS is held across multiple exchanges within a
+       * SELECT..DESELECT session — select handles LASTXFER on deselect).
+       */
+
+      if (nwords == 1 && !spi->escape_lastxfer)
+        {
+          qspi_putreg(spi, QSPI_CR_LASTXFER, SAM_QSPI_CR_OFFSET);
+        }
+
       /* Wait for the read data to be available in the RDR.
        * TODO:  Data transfer rates would be improved using the RX FIFO
        *        (and also DMA)
@@ -800,13 +867,14 @@ struct spi_dev_s *sam_qspi_spi_initialize(int intf)
        * select pins must be selected by board-specific logic.
        */
 
+      sam_configgpio(GPIO_QSPI_CS);     /* CS (hardware-managed) */
       sam_configgpio(GPIO_QSPI_IO0);    /* MOSI */
       sam_configgpio(GPIO_QSPI_IO1);    /* MISO */
       sam_configgpio(GPIO_QSPI_SCK);
 
       /* Disable write protection */
 
-      qspi_putreg(spi, SAM_QSPI_WPCR_OFFSET, QSPI_WPCR_WPKEY);
+      qspi_putreg(spi, QSPI_WPCR_WPKEY, SAM_QSPI_WPCR_OFFSET);
 
       /* Disable QSPI before configuring it */
 
@@ -818,9 +886,13 @@ struct spi_dev_s *sam_qspi_spi_initialize(int intf)
       qspi_putreg(spi, QSPI_CR_SWRST, SAM_QSPI_CR_OFFSET);
       leave_critical_section(flags);
 
-      /* Configure the QSPI mode register - select SPI mode */
+      /* Configure the QSPI mode register - select SPI mode.
+       * Use CSMODE_LASTXFER so CS stays asserted across multi-byte
+       * transactions until LASTXFER is set in CR on the final byte.
+       */
 
-      qspi_putreg(spi, QSPI_MR_SPI, SAM_QSPI_MR_OFFSET);
+      qspi_putreg(spi, QSPI_MR_SPI | QSPI_MR_CSMODE_LASTXFER,
+                   SAM_QSPI_MR_OFFSET);
 
       /* And enable the SPI */
 

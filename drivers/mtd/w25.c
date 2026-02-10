@@ -100,6 +100,7 @@
 
 #define W25_JEDEC_WINBOND          0xef  /* Winbond manufacturer ID */
 #define W25_JEDEC_AMIC             0x37  /* AMIC manufacturer ID */
+#define W25_JEDEC_SPANSION         0x01  /* Spansion/Cypress manufacturer ID (S25FL1xx) */
 
 #define W25X_JEDEC_MEMORY_TYPE     0x30  /* W25X memory type */
 #define W25Q_JEDEC_MEMORY_TYPE_A   0x40  /* W25Q memory type */
@@ -390,7 +391,8 @@ static inline int w25_readid(struct w25_dev_s *priv)
   /* Check for a valid manufacturer and memory type */
 
   if ((manufacturer == W25_JEDEC_WINBOND  ||
-       manufacturer == W25_JEDEC_AMIC)    &&
+       manufacturer == W25_JEDEC_AMIC     ||
+       manufacturer == W25_JEDEC_SPANSION) &&
       (memory == W25X_JEDEC_MEMORY_TYPE   ||
        memory == W25Q_JEDEC_MEMORY_TYPE_A ||
        memory == W25Q_JEDEC_MEMORY_TYPE_B ||
