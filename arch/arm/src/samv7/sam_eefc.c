@@ -44,7 +44,7 @@
 
 /* Configuration ************************************************************/
 
-#if defined(CONFIG_ARCH_CHIP_SAMV71) || defined(CONFIG_ARCH_CHIP_SAME70)
+#if defined(CONFIG_ARCH_CHIP_SAMV71) || defined(CONFIG_ARCH_CHIP_PIC32CZCA70) || defined(CONFIG_ARCH_CHIP_SAME70)
 /* All sectors are 128KB and are uniform in size.
  * The only exception is sector 0 which is subdivided into two small sectors
  * of 8KB and one larger sector of 112KB.
