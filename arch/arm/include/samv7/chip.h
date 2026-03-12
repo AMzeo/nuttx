@@ -368,6 +368,127 @@
 #  define SAMV7_NACC                  1             /* 1 Analog comparator */
 #  define SAMV7_NETM                  1             /* 1 Embedded Trace Macrocell (ETM) */
 
+/* PIC32CZ CA70 064 - 2048 Kbytes FLASH / 512 Kbytes SRAM
+ * PIC32CZ CA70 100 - 2048 Kbytes FLASH / 512 Kbytes SRAM
+ * PIC32CZ CA70 144 - 2048 Kbytes FLASH / 512 Kbytes SRAM
+ *
+ * Pin-to-pin compatible successor to SAM E70/S70/V70/V71 family.
+ * 064: QFN64 packaging
+ * 100: LQFP100 packaging
+ * 144: LQFP144 packaging
+ */
+
+#elif defined(CONFIG_ARCH_CHIP_PIC32CZCA70144)
+
+#  define SAMV7_FLASH_SIZE            (2048*1024)   /* 2048KB */
+#  define SAMV7_SRAM_SIZE             (512*1024)    /*  512KB */
+#  define SAMV7_BSRAM_SIZE            (1*1024)      /*    1KB Backup SRAM */
+
+/* Peripherals (same as SAMV71Q21 144-pin) */
+
+#  define SAMV7_NPIO                  5             /* 5 PIO ports A-E */
+#  define SAMV7_NEBI                  1             /* Have External Bus Interface (EBI) */
+#  define SAMV7_NSDRAMC               1             /* Have SDRAM controller (SDRAMC) */
+#  define SAMV7_NMLB                  0             /* No MediaLB interface */
+#  define SAMV7_NDMACHAN              24            /* 24 Central DMA Channels */
+#  define SAMV7_NADC12                24            /* 24 12-bit ADC channels */
+#  define SAMV7_NDAC12                2             /* 2 12-bit DAC channels */
+#  define SAMV7_NTCCH                 12            /* 12 Timer/counter channels */
+#  define SAMV7_NTCCHIO               36            /* 36 Timer/counter channels I/O */
+#  define SAMV7_NUSART                3             /* 3 USARTs */
+#  define SAMV7_NUART                 5             /* 5 UARTs */
+#  define SAMV7_NQSPI                 0             /* No dedicated QSPI (QSPI in SPI mode) */
+#  define SAMV7_NSPI                  2             /* 2 SPI, SPI0-1 */
+#  define SAMV7_NTWIHS                3             /* 3 TWIHS */
+#  define SAMV7_NHSMCI4               1             /* 1 4-bit HSMCI port */
+#  define SAMV7_NCAN                  2             /* 2 CAN ports */
+#  define SAMV7_NEMAC                 1             /* 1 Ethernet MAC (GMAC) */
+#  define SAMV7_NEMACMII              1             /* 1 Ethernet MAC MII interface */
+#  define SAMV7_NEMACRMII             1             /* 1 Ethernet MAC RMII interface */
+#  define SAMV7_NISI12                1             /* 1 12-bit ISI interface */
+#  define SAMV7_NISI8                 0             /* No 8-bit ISI interface */
+#  define SAMV7_NSSC                  1             /* 1 SSC */
+#  define SAMV7_NUDPHS                1             /* 1 USB high speed device */
+#  define SAMV7_NUHPHS                1             /* 1 USB high speed embedded Mini-Host */
+#  define SAMV7_NUDPFS                0             /* No USB full speed device */
+#  define SAMV7_NUHPFS                0             /* No USB full speed embedded host */
+#  define SAMV7_NACC                  1             /* 1 Analog comparator */
+#  define SAMV7_NETM                  1             /* 1 Embedded Trace Macrocell (ETM) */
+
+#elif defined(CONFIG_ARCH_CHIP_PIC32CZCA70100)
+
+#  define SAMV7_FLASH_SIZE            (2048*1024)   /* 2048KB */
+#  define SAMV7_SRAM_SIZE             (512*1024)    /*  512KB */
+#  define SAMV7_BSRAM_SIZE            (1*1024)      /*    1KB Backup SRAM */
+
+/* Peripherals (same as SAMV71N21 100-pin) */
+
+#  define SAMV7_NPIO                  5             /* 5 PIO ports A-E */
+#  define SAMV7_NEBI                  0             /* No External Bus Interface (EBI) */
+#  define SAMV7_NSDRAMC               0             /* No SDRAM controller (SDRAMC) */
+#  define SAMV7_NMLB                  0             /* No MediaLB interface */
+#  define SAMV7_NDMACHAN              24            /* 24 Central DMA Channels */
+#  define SAMV7_NADC12                10            /* 10 12-bit ADC channels */
+#  define SAMV7_NDAC12                2             /* 2 12-bit DAC channels */
+#  define SAMV7_NTCCH                 12            /* 12 Timer/counter channels */
+#  define SAMV7_NTCCHIO               9             /* 9 Timer/counter channels I/O */
+#  define SAMV7_NUSART                3             /* 3 USARTs */
+#  define SAMV7_NUART                 5             /* 5 UARTs */
+#  define SAMV7_NQSPI                 0             /* No dedicated QSPI (QSPI in SPI mode) */
+#  define SAMV7_NSPI                  1             /* 1 SPI, SPI0 */
+#  define SAMV7_NTWIHS                3             /* 3 TWIHS */
+#  define SAMV7_NHSMCI4               1             /* 1 4-bit HSMCI port */
+#  define SAMV7_NCAN                  2             /* 2 CAN ports */
+#  define SAMV7_NEMAC                 1             /* 1 Ethernet MAC (GMAC) */
+#  define SAMV7_NEMACMII              1             /* 1 Ethernet MAC MII interface */
+#  define SAMV7_NEMACRMII             1             /* 1 Ethernet MAC RMII interface */
+#  define SAMV7_NISI12                1             /* 1 12-bit ISI interface */
+#  define SAMV7_NISI8                 0             /* No 8-bit ISI interface */
+#  define SAMV7_NSSC                  1             /* 1 SSC */
+#  define SAMV7_NUDPHS                1             /* 1 USB high speed device */
+#  define SAMV7_NUHPHS                1             /* 1 USB high speed embedded Mini-Host */
+#  define SAMV7_NUDPFS                0             /* No USB full speed device */
+#  define SAMV7_NUHPFS                0             /* No USB full speed embedded host */
+#  define SAMV7_NACC                  1             /* 1 Analog comparator */
+#  define SAMV7_NETM                  1             /* 1 Embedded Trace Macrocell (ETM) */
+
+#elif defined(CONFIG_ARCH_CHIP_PIC32CZCA70064)
+
+#  define SAMV7_FLASH_SIZE            (2048*1024)   /* 2048KB */
+#  define SAMV7_SRAM_SIZE             (512*1024)    /*  512KB */
+#  define SAMV7_BSRAM_SIZE            (1*1024)      /*    1KB Backup SRAM */
+
+/* Peripherals (same as SAMV71J21 64-pin) */
+
+#  define SAMV7_NPIO                  5             /* 5 PIO ports A-E */
+#  define SAMV7_NEBI                  0             /* No External Bus Interface (EBI) */
+#  define SAMV7_NSDRAMC               0             /* No SDRAM controller (SDRAMC) */
+#  define SAMV7_NMLB                  0             /* No MediaLB interface */
+#  define SAMV7_NDMACHAN              24            /* 24 Central DMA Channels */
+#  define SAMV7_NADC12                5             /* 5 12-bit ADC channels */
+#  define SAMV7_NDAC12                1             /* 1 12-bit DAC channel */
+#  define SAMV7_NTCCH                 12            /* 12 Timer/counter channels */
+#  define SAMV7_NTCCHIO               3             /* 3 Timer/counter channels I/O */
+#  define SAMV7_NUSART                0             /* No USARTs */
+#  define SAMV7_NUART                 5             /* 5 UARTs */
+#  define SAMV7_NQSPI                 0             /* No dedicated QSPI (QSPI in SPI mode) */
+#  define SAMV7_NSPI                  1             /* 1 SPI */
+#  define SAMV7_NTWIHS                2             /* 2 TWIHS */
+#  define SAMV7_NHSMCI4               0             /* No 4-bit HSMCI port */
+#  define SAMV7_NCAN                  1             /* 1 CAN port */
+#  define SAMV7_NEMAC                 1             /* 1 Ethernet MAC (GMAC) */
+#  define SAMV7_NEMACMII              0             /* No Ethernet MAC MII interface */
+#  define SAMV7_NEMACRMII             1             /* 1 Ethernet MAC RMII interface */
+#  define SAMV7_NISI12                0             /* No 12-bit ISI interface */
+#  define SAMV7_NISI8                 1             /* 1 8-bit ISI interface */
+#  define SAMV7_NSSC                  1             /* 1 SSC */
+#  define SAMV7_NUDPHS                0             /* No USB high speed device */
+#  define SAMV7_NUHPHS                0             /* No USB high speed embedded Mini-Host */
+#  define SAMV7_NUDPFS                1             /* 1 USB full speed device */
+#  define SAMV7_NUHPFS                1             /* 1 USB full speed embedded host */
+#  define SAMV7_NACC                  1             /* 1 Analog comparator */
+#  define SAMV7_NETM                  1             /* 1 Embedded Trace Macrocell (ETM) */
+
 #else
 #  error "Unknown SAMV7 chip type"
 #endif
