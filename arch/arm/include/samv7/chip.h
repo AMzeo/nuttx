@@ -397,7 +397,7 @@
 #  define SAMV7_NTCCHIO               36            /* 36 Timer/counter channels I/O */
 #  define SAMV7_NUSART                3             /* 3 USARTs */
 #  define SAMV7_NUART                 5             /* 5 UARTs */
-#  define SAMV7_NQSPI                 0             /* No dedicated QSPI (QSPI in SPI mode) */
+#  define SAMV7_NQSPI                 1             /* 1 QSPI (always in SPI compat mode) */
 #  define SAMV7_NSPI                  2             /* 2 SPI, SPI0-1 */
 #  define SAMV7_NTWIHS                3             /* 3 TWIHS */
 #  define SAMV7_NHSMCI4               1             /* 1 4-bit HSMCI port */
@@ -434,7 +434,7 @@
 #  define SAMV7_NTCCHIO               9             /* 9 Timer/counter channels I/O */
 #  define SAMV7_NUSART                3             /* 3 USARTs */
 #  define SAMV7_NUART                 5             /* 5 UARTs */
-#  define SAMV7_NQSPI                 0             /* No dedicated QSPI (QSPI in SPI mode) */
+#  define SAMV7_NQSPI                 1             /* 1 QSPI (always in SPI compat mode) */
 #  define SAMV7_NSPI                  1             /* 1 SPI, SPI0 */
 #  define SAMV7_NTWIHS                3             /* 3 TWIHS */
 #  define SAMV7_NHSMCI4               1             /* 1 4-bit HSMCI port */
