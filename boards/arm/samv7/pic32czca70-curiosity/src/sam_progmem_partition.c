@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/arm/src/samv7/sam_periphclks.h
+ * boards/arm/samv7/pic32czca70-curiosity/src/sam_progmem_partition.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,58 +18,78 @@
  *
  ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_SAMV7_SAM_PERIPHCLKS_H
-#define __ARCH_ARM_SRC_SAMV7_SAM_PERIPHCLKS_H
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
 
-#if defined(CONFIG_ARCH_CHIP_SAMV71) || defined(CONFIG_ARCH_CHIP_PIC32CZCA70)
-#  include "samv71_periphclks.h"
-#elif defined(CONFIG_ARCH_CHIP_SAME70)
-#  include "same70_periphclks.h"
-#else
-#  error Unrecognized SAMV7 architecture
-#endif
+#include <stdbool.h>
+#include <syslog.h>
+#include <assert.h>
+#include <debug.h>
+
+#include <nuttx/arch.h>
+#include <nuttx/board.h>
+#include <nuttx/drivers/drivers.h>
+#include <nuttx/mtd/mtd.h>
+#include <nuttx/net/usrsock.h> /* For nitems */
+
+#include "sam_board.h"
+#include "board_progmem.h" /* For struct mtd_partition_s definition */
+
+#ifdef CONFIG_SAMV7_PROGMEM
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
 /****************************************************************************
- * Public Types
+ * Private Data
  ****************************************************************************/
 
-/****************************************************************************
- * Inline Functions
- ****************************************************************************/
-
-#ifndef __ASSEMBLY__
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-#undef EXTERN
-#if defined(__cplusplus)
-#define EXTERN extern "C"
-extern "C"
+static struct mtd_partition_s g_mtd_partition_table[] =
 {
-#else
-#define EXTERN extern
-#endif
+  {
+    .offset  = 0x1e0000,
+    .size    = 0x20000,
+    .devpath = "dev/progmem"
+  },
+};
+
+static const size_t g_mtd_partition_table_size =
+    nitems(g_mtd_partition_table);
 
 /****************************************************************************
- * Public Function Prototypes
+ * Private Functions
  ****************************************************************************/
 
-#undef EXTERN
-#if defined(__cplusplus)
-}
-#endif
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
 
-#endif /* __ASSEMBLY__ */
-#endif /* __ARCH_ARM_SRC_SAMV7_SAM_PERIPHCLKS_H */
+/****************************************************************************
+ * Name: sam_flash_init
+ *
+ * Description:
+ *   Initialize the embedded flash programming memory.
+ *
+ ****************************************************************************/
+
+int sam_flash_init()
+{
+  int ret;
+
+  /* Call SAMv7 common board function to init progmem. */
+
+  ret = board_progmem_init(PROGMEM_MTD_MINOR, g_mtd_partition_table,
+                           g_mtd_partition_table_size);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize progmem: %d\n", ret);
+    }
+
+  return ret;
+}
+
+#endif /* CONFIG_SAMV7_PROGMEM */
