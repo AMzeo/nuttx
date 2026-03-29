@@ -33,6 +33,8 @@ static const uint8_t g_sercom_gclk_chan[PIC32CZCA90_NSERCOM] =
   GCLK_CHAN_SERCOM5_CORE,   /* SERCOM5 */
   GCLK_CHAN_SERCOM6_CORE,   /* SERCOM6 */
   GCLK_CHAN_SERCOM7_CORE,   /* SERCOM7 */
+  GCLK_CHAN_SERCOM8_CORE,   /* SERCOM8 */
+  GCLK_CHAN_SERCOM9_CORE,   /* SERCOM9 */
 };
 
 /****************************************************************************
@@ -58,27 +60,27 @@ void sercom_enable(int sercom)
   switch (sercom)
     {
       case 0: /* SERCOM0 - APB A */
-        regval  = getreg32(SAM_MCLK_APBAMASK);
-        regval |= MCLK_APBAMASK_SERCOM0;
-        putreg32(regval, SAM_MCLK_APBAMASK);
+        regval  = getreg32(SAM_MCLK_APBEMASK);
+        regval |= MCLK_APBEMASK_SERCOM0;
+        putreg32(regval, SAM_MCLK_APBEMASK);
         break;
 
       case 1: /* SERCOM1 - APB A */
-        regval  = getreg32(SAM_MCLK_APBAMASK);
-        regval |= MCLK_APBAMASK_SERCOM1;
-        putreg32(regval, SAM_MCLK_APBAMASK);
+        regval  = getreg32(SAM_MCLK_APBEMASK);
+        regval |= MCLK_APBEMASK_SERCOM1;
+        putreg32(regval, SAM_MCLK_APBEMASK);
         break;
 
       case 2: /* SERCOM2 - APB B */
-        regval  = getreg32(SAM_MCLK_APBBMASK);
-        regval |= MCLK_APBBMASK_SERCOM2;
-        putreg32(regval, SAM_MCLK_APBBMASK);
+        regval  = getreg32(SAM_MCLK_APBDMASK);
+        regval |= MCLK_APBDMASK_SERCOM2;
+        putreg32(regval, SAM_MCLK_APBDMASK);
         break;
 
       case 3: /* SERCOM3 - APB B */
-        regval  = getreg32(SAM_MCLK_APBBMASK);
-        regval |= MCLK_APBBMASK_SERCOM3;
-        putreg32(regval, SAM_MCLK_APBBMASK);
+        regval  = getreg32(SAM_MCLK_APBDMASK);
+        regval |= MCLK_APBDMASK_SERCOM3;
+        putreg32(regval, SAM_MCLK_APBDMASK);
         break;
 
       case 4: /* SERCOM4 - APB **E** (CA90-specific!) */
@@ -99,10 +101,22 @@ void sercom_enable(int sercom)
         putreg32(regval, SAM_MCLK_APBDMASK);
         break;
 
-      case 7: /* SERCOM7 - APB D */
-        regval  = getreg32(SAM_MCLK_APBDMASK);
-        regval |= MCLK_APBDMASK_SERCOM7;
-        putreg32(regval, SAM_MCLK_APBDMASK);
+      case 7: /* SERCOM7 - APB C */
+        regval  = getreg32(SAM_MCLK_APBCMASK);
+        regval |= MCLK_APBCMASK_SERCOM7;
+        putreg32(regval, SAM_MCLK_APBCMASK);
+        break;
+
+      case 8: /* SERCOM8 - APB C */
+        regval  = getreg32(SAM_MCLK_APBCMASK);
+        regval |= MCLK_APBCMASK_SERCOM8;
+        putreg32(regval, SAM_MCLK_APBCMASK);
+        break;
+
+      case 9: /* SERCOM9 - APB C */
+        regval  = getreg32(SAM_MCLK_APBCMASK);
+        regval |= MCLK_APBCMASK_SERCOM9;
+        putreg32(regval, SAM_MCLK_APBCMASK);
         break;
 
       default:
