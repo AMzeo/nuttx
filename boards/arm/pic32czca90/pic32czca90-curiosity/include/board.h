@@ -37,7 +37,7 @@
 
 /* Oscillator frequencies */
 
-#define BOARD_XOSC0_FREQUENCY    24000000   /* 24 MHz MEMS oscillator */
+#define BOARD_XOSC0_FREQUENCY    12000000   /* 12 MHz MEMS oscillator Y300: DSC6011JI2B-012.0000 */
 #define BOARD_XOSC1_FREQUENCY    0          /* XOSC1 not used */
 #define BOARD_XOSC32K_FREQUENCY  32768      /* 32.768 KHz (if present) */
 #define BOARD_OSC32K_FREQUENCY   32768      /* OSCULP32K nominal */
@@ -52,7 +52,7 @@
 #define BOARD_GCLK2_FREQUENCY    0                        /* Disabled */
 #define BOARD_GCLK3_FREQUENCY    BOARD_OSC32K_FREQUENCY   /* 32.768 KHz */
 #define BOARD_GCLK4_FREQUENCY    BOARD_DPLL0_FREQUENCY    /* 300 MHz */
-#define BOARD_GCLK5_FREQUENCY    (BOARD_XOSC0_FREQUENCY / 4) /* 6 MHz */
+#define BOARD_GCLK5_FREQUENCY    (BOARD_XOSC0_FREQUENCY / 2) /* 6 MHz */
 #define BOARD_GCLK6_FREQUENCY    0                        /* Disabled */
 #define BOARD_GCLK7_FREQUENCY    0                        /* Disabled */
 #define BOARD_GCLK8_FREQUENCY    0                        /* Disabled */
@@ -175,7 +175,7 @@
 #define BOARD_GCLK5_OE           FALSE
 #define BOARD_GCLK5_RUNSTDBY     FALSE
 #define BOARD_GCLK5_SOURCE       0         /* XOSC0 */
-#define BOARD_GCLK5_DIV          4         /* 24 MHz / 4 = 6 MHz */
+#define BOARD_GCLK5_DIV          2         /* 12 MHz / 2 = 6 MHz (DPLL0 ref) */
 
 /* GCLK6-11 - disabled */
 
@@ -330,8 +330,8 @@
 
 /* SERCOM4 - Console UART (debug via PKOB4)
  *
- *   PB08 = SERCOM4 PAD0 (TX), function D
- *   PB09 = SERCOM4 PAD1 (RX), function D
+ *   PC21 = SERCOM4 PAD0 (TX), function E
+ *   PC22 = SERCOM4 PAD1 (RX), function E
  *
  *   TXPO = PAD0 (TXPAD0_2: TxD=PAD0, no flow control)
  *   RXPO = PAD1
@@ -352,7 +352,7 @@
 #define BOARD_SERCOM4_CORELOCK   FALSE
 #define BOARD_SERCOM4_FREQUENCY  BOARD_GCLK1_FREQUENCY   /* 48 MHz */
 
-/* SERCOM0 - spare UART (PA04/PA05, function D)
+/* SERCOM0 - spare UART (PA04/PA05, function E)
  *
  *   PA04 = SERCOM0 PAD0 (TX)
  *   PA05 = SERCOM0 PAD1 (RX)
