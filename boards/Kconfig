@@ -1792,6 +1792,14 @@ config ARCH_BOARD_SAME54_XPLAINED_PRO
 	---help---
 		The port of NuttX to the Atmel SAME54-Xplained Pro development board.
 
+config ARCH_BOARD_PIC32CZCA90_CURIOSITY
+	bool "Microchip PIC32CZ CA90 Curiosity Ultra"
+	depends on ARCH_CHIP_PIC32CZCA90
+	select ARCH_HAVE_LEDS
+	---help---
+		Microchip PIC32CZ CA90 Curiosity Ultra board (EV16W43A).
+		Cortex-M7 at 300 MHz, 8 MB flash, 1 MB SRAM.
+
 config ARCH_BOARD_SAML21_XPLAINED
 	bool "Atmel SAML21-Xplained Pro development board"
 	depends on ARCH_CHIP_SAML21J18
@@ -2778,6 +2786,7 @@ config ARCH_BOARD
 	default "samd20-xplained"          if ARCH_BOARD_SAMD20_XPLAINED
 	default "samd21-xplained"          if ARCH_BOARD_SAMD21_XPLAINED
 	default "same54-xplained-pro"      if ARCH_BOARD_SAME54_XPLAINED_PRO
+	default "pic32czca90-curiosity"    if ARCH_BOARD_PIC32CZCA90_CURIOSITY
 	default "saml21-xplained"          if ARCH_BOARD_SAML21_XPLAINED
 	default "sam3u-ek"                 if ARCH_BOARD_SAM3UEK
 	default "sam4cmp-db"               if ARCH_BOARD_SAM4CMP_DB
@@ -3171,6 +3180,9 @@ source "boards/arm/samd2l2/samd21-xplained/Kconfig"
 endif
 if ARCH_BOARD_SAME54_XPLAINED_PRO
 source "boards/arm/samd5e5/same54-xplained-pro/Kconfig"
+endif
+if ARCH_BOARD_PIC32CZCA90_CURIOSITY
+source "boards/arm/pic32czca90/pic32czca90-curiosity/Kconfig"
 endif
 if ARCH_BOARD_SAML21_XPLAINED
 source "boards/arm/samd2l2/saml21-xplained/Kconfig"

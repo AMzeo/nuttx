@@ -383,3 +383,18 @@ void sam_lowputc(uint32_t ch)
   while ((getreg8(intflag) & USART_INT_TXC) == 0);
 }
 #endif
+
+/****************************************************************************
+ * Name: arm_lowputc
+ *
+ * Description:
+ *   Output one byte on the serial console (required by NuttX common code).
+ *
+ ****************************************************************************/
+
+void arm_lowputc(char ch)
+{
+#ifdef HAVE_SERIAL_CONSOLE
+  sam_lowputc((uint32_t)ch);
+#endif
+}
