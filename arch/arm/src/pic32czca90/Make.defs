@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: Apache-2.0
+############################################################################
+# arch/arm/src/pic32czca90/Make.defs
+#
+# PIC32CZ CA90 build definitions
+############################################################################
+
+# Common ARM and Cortex-M7 files
+
+include armv7-m/Make.defs
+
+# Required PIC32CZ CA90 files
+
+CHIP_CSRCS  = sam_clockconfig.c sam_gclk.c sam_irq.c sam_lowputc.c
+CHIP_CSRCS += sam_port.c sam_serial.c sam_start.c sam_usart.c
+
+# Configuration-dependent files
+
+ifneq ($(CONFIG_SCHED_TICKLESS),y)
+CHIP_CSRCS += sam_timerisr.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_SERCOM),y)
+CHIP_CSRCS += sam_sercom.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_TC),y)
+CHIP_CSRCS += sam_tc.c
+
+ifeq ($(CONFIG_PIC32CZCA90_ONESHOT),y)
+CHIP_CSRCS += sam_oneshot.c sam_oneshot_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_FREERUN),y)
+CHIP_CSRCS += sam_freerun.c
+endif
+
+ifeq ($(CONFIG_SCHED_TICKLESS),y)
+CHIP_CSRCS += sam_tickless.c
+endif
+endif # CONFIG_PIC32CZCA90_TC
+
+ifeq ($(CONFIG_BUILD_PROTECTED),y)
+CHIP_CSRCS += sam_userspace.c sam_mpuinit.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_EIC),y)
+CHIP_CSRCS += sam_eic.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_DMAC),y)
+CHIP_CSRCS += sam_dmac.c
+endif
+
+ifneq ($(CONFIG_ARCH_IDLE_CUSTOM),y)
+CHIP_CSRCS += sam_idle.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_HAVE_SPI),y)
+CHIP_CSRCS += sam_spi.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_HAVE_I2C_MASTER),y)
+CHIP_CSRCS += sam_i2c_master.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_WDT),y)
+CHIP_CSRCS += sam_wdt.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_GMAC),y)
+CHIP_CSRCS += sam_gmac.c
+CHIP_CSRCS += sam_ethernet.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_USB),y)
+CHIP_CSRCS += sam_usb.c
+endif
+
+ifeq ($(CONFIG_PIC32CZCA90_PROGMEM),y)
+CHIP_CSRCS += sam_progmem.c
+endif
