@@ -510,9 +510,10 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
   int i;
 
   /* Set flash wait states for target frequency */
-
-  putreg32(NVMCTRL_CTRLA_RWS(config->waitstates) | NVMCTRL_CTRLA_AUTOWS,
-           SAM_NVMCTRL_CTRLA);
+  /* CZCA90: No NVMCTRL. FCR manages flash wait states automatically.
+ * At 300 MHz with VDDREG=1.8V, FCR sets appropriate wait states. */
+  // putreg32(NVMCTRL_CTRLA_RWS(config->waitstates) | NVMCTRL_CTRLA_AUTOWS,
+  //          SAM_NVMCTRL_CTRLA);
 
   /* Configure XOSC32K if needed */
 
