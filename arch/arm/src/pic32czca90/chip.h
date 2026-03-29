@@ -9,7 +9,8 @@
 #define __ARCH_ARM_SRC_PIC32CZCA90_CHIP_H
 
 #include <nuttx/config.h>
-#include <arch/pic32czca90/irq.h>
+#include <arch/irq.h>
+#include <arch/pic32czca90/chip.h>
 
 /* Cortex-M7: number of peripheral interrupts = SAM_IRQ_NEXTINT */
 

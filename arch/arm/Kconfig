@@ -296,6 +296,21 @@ config ARCH_CHIP_SAME5X
 	---help---
 		Microchip SAME5x (ARM Cortex-M4)
 
+config ARCH_CHIP_PIC32CZCA90
+	bool "Microchip PIC32CZ CA90"
+	select ARCH_CORTEXM7
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	select ARCH_HAVE_FPU
+	select ARCH_HAVE_DPFPU
+	select ARCH_HAVE_FETCHADD
+	select ARMV7M_HAVE_ICACHE
+	select ARMV7M_HAVE_DCACHE
+	select ARMV7M_HAVE_ITCM
+	select ARMV7M_HAVE_DTCM
+	---help---
+		Microchip PIC32CZ CA90 (ARM Cortex-M7, 300 MHz)
+
 config ARCH_CHIP_SAM34
 	bool "Atmel SAM3/SAM4"
 	select ARCH_HAVE_MPU
@@ -887,6 +902,7 @@ config ARCH_CHIP
 	default "sama5"		if ARCH_CHIP_SAMA5
 	default "samd2l2"	if ARCH_CHIP_SAMD2X || ARCH_CHIP_SAML2X
 	default "samd5e5"	if ARCH_CHIP_SAMD5X || ARCH_CHIP_SAME5X
+	default "pic32czca90"	if ARCH_CHIP_PIC32CZCA90
 	default "sam34"		if ARCH_CHIP_SAM34
 	default "samv7"		if ARCH_CHIP_SAMV7
 	default "stm32"		if ARCH_CHIP_STM32
@@ -1257,6 +1273,9 @@ source "arch/arm/src/samd2l2/Kconfig"
 endif
 if ARCH_CHIP_SAMD5X || ARCH_CHIP_SAME5X
 source "arch/arm/src/samd5e5/Kconfig"
+endif
+if ARCH_CHIP_PIC32CZCA90
+source "arch/arm/src/pic32czca90/Kconfig"
 endif
 if ARCH_CHIP_SAM34
 source "arch/arm/src/sam34/Kconfig"
