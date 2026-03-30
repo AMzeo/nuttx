@@ -3,7 +3,14 @@
  * arch/arm/src/pic32czca90/hardware/sam_port.h
  *
  * PIC32CZ CA90 PORT (GPIO) register definitions
- * Same PORT IP block as SAMD5E5
+ *
+ * FIX (MODERATE): Previous version only defined port bases for PORTA-PORTD
+ * (4 groups). The PIC32CZ CA90 has 7 PORT groups (A-G). Added PORTE_BASE,
+ * PORTF_BASE, PORTG_BASE at the correct stride offsets (each group = 0x80).
+ *   PORTE = PORT_BASE + 0x0200
+ *   PORTF = PORT_BASE + 0x0280
+ *   PORTG = PORT_BASE + 0x0300
+ * These match the pic32czca90_memorymap.h definitions.
  ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_PIC32CZCA90_HARDWARE_SAM_PORT_H
@@ -28,21 +35,27 @@
 #define SAM_PORT_PMUX_OFFSET(n)     (0x0030 + (n))
 #define SAM_PORT_PINCFG_OFFSET(n)   (0x0040 + (n))
 
-/* Port group base addresses */
+/* Port group base addresses – stride 0x80 per group
+ * DS60001749K Table 8-6: PORT base = SAM_PORT_BASE = 0x44840000
+ * All 7 groups defined; previously only A-D were present.
+ */
 
 #define SAM_PORTA_BASE              (SAM_PORT_BASE + 0x0000)
 #define SAM_PORTB_BASE              (SAM_PORT_BASE + 0x0080)
-#define SAM_PORTC_BASE              (SAM_PORT_BASE + 0x0100)
+#define SAM_PORTC_BASE              (SAM_PORT_BASE + 0x0100)  /* Console UART */
 #define SAM_PORTD_BASE              (SAM_PORT_BASE + 0x0180)
+#define SAM_PORTE_BASE              (SAM_PORT_BASE + 0x0200)  /* added */
+#define SAM_PORTF_BASE              (SAM_PORT_BASE + 0x0280)  /* added */
+#define SAM_PORTG_BASE              (SAM_PORT_BASE + 0x0300)  /* added */
 
-/* PINCFG register */
+/* PINCFG register bits */
 
 #define PORT_PINCFG_PMUXEN          (1 << 0)
 #define PORT_PINCFG_INEN            (1 << 1)
 #define PORT_PINCFG_PULLEN          (1 << 2)
 #define PORT_PINCFG_DRVSTR          (1 << 6)
 
-/* PMUX register */
+/* PMUX register bits */
 
 #define PORT_PMUX_PMUXE_SHIFT       0
 #define PORT_PMUX_PMUXE_MASK        (0xf << PORT_PMUX_PMUXE_SHIFT)

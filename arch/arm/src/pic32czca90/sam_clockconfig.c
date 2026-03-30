@@ -5,11 +5,23 @@
  * PIC32CZ CA90 clock configuration
  *
  * Clock tree for CA90 Curiosity Ultra:
- *   MEMS oscillator -> XOSC0 (24 MHz, XTALEN=0)
- *   XOSC0 -> GCLK5 (div 4 = 6 MHz) -> DPLL0 ref
+ *   MEMS oscillator Y300 (DSC6011JI2B-012.0000) -> XOSC0 (12 MHz, XTALEN=0)
+ *   XOSC0 -> GCLK5 (div 2 = 6 MHz) -> DPLL0 ref (via GCLK_PCHCTRL[1])
  *   DPLL0: LDR=49 -> 6 MHz * 50 = 300 MHz
  *   DPLL0 -> GCLK0 -> CPU (300 MHz)
- *   DFLL48M -> GCLK1 (48 MHz) -> USB, peripherals
+ *   DFLL48M (open loop) -> GCLK1 (48 MHz) -> USB, peripherals
+ *   GCLK5 (6 MHz) -> SERCOM4 core (console UART, stable clock for bringup)
+ *
+ * FIX 1 (CRITICAL): Added sam_gclk_chan_enable(GCLK_CHAN_DPLL0_REF, ...) 
+ *   before sam_dpll_configure(0, ...). Without this the DPLL0 reference
+ *   GCLK peripheral channel (PCHCTRL[1]) is never connected to GCLK5.
+ *   DPLL0 therefore had no reference and the DPLLSTATUS lock-wait loop
+ *   in sam_dpll_configure() blocked forever, halting all boot.
+ *
+ * FIX 2 (COMMENT): Stale header comment said "XOSC0 (24 MHz)" —
+ *   the actual oscillator is 12 MHz (DSC6011JI2B-012.0000). The
+ *   BOARD_XOSC0_FREQUENCY define was already correct; only the comment
+ *   was wrong. Corrected here.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -190,8 +202,6 @@ static void sam_xosc32k_configure(const struct sam_xosc32_config_s *config)
       return;
     }
 
-  /* Configure XOSC32K */
-
   regval = 0;
 
   if (config->extalen)
@@ -221,19 +231,13 @@ static void sam_xosc32k_configure(const struct sam_xosc32_config_s *config)
 
   regval |= (config->startup << OSC32KCTRL_XOSC32K_STARTUP_SHIFT);
 
-  /* Enable */
-
   regval |= OSC32KCTRL_XOSC32K_ENABLE;
   putreg16(regval, SAM_OSC32KCTRL_XOSC32K);
-
-  /* Wait for ready */
 
   while ((getreg32(SAM_OSC32KCTRL_STATUS) &
           OSC32KCTRL_STATUS_XOSC32KRDY) == 0)
     {
     }
-
-  /* Set RTC clock source */
 
   putreg8(config->rtcsel, SAM_OSC32KCTRL_RTCCTRL);
 #endif
@@ -286,8 +290,6 @@ static void sam_xosc_configure(int xosc,
 
   regval |= (config->startup << OSCCTRL_XOSCCTRL_STARTUP_SHIFT);
 
-  /* Set current multiplier and reference current based on frequency */
-
   if (config->xosc_frequency <= 8000000)
     {
       regval |= (3 << OSCCTRL_XOSCCTRL_IMULT_SHIFT);
@@ -309,12 +311,8 @@ static void sam_xosc_configure(int xosc,
       regval |= (3 << OSCCTRL_XOSCCTRL_IPTAT_SHIFT);
     }
 
-  /* Enable */
-
   regval |= OSCCTRL_XOSCCTRL_ENABLE;
   putreg32(regval, regaddr);
-
-  /* Wait for XOSC ready */
 
   if (xosc == 0)
     {
@@ -341,14 +339,10 @@ static void sam_dfll_configure(const struct sam_dfll_config_s *config)
       return;
     }
 
-  /* Disable DFLL before configuring */
-
   putreg8(0, SAM_OSCCTRL_DFLLCTRLA);
   while ((getreg8(SAM_OSCCTRL_DFLLSYNC) & OSCCTRL_DFLLSYNC_ENABLE) != 0)
     {
     }
-
-  /* Set multiplier */
 
   regval = (config->mul << OSCCTRL_DFLLMUL_MUL_SHIFT) |
            (config->fstep << OSCCTRL_DFLLMUL_FSTEP_SHIFT) |
@@ -357,8 +351,6 @@ static void sam_dfll_configure(const struct sam_dfll_config_s *config)
   while ((getreg8(SAM_OSCCTRL_DFLLSYNC) & OSCCTRL_DFLLSYNC_DFLLMUL) != 0)
     {
     }
-
-  /* Configure CTRLB */
 
   regval = 0;
   if (config->mode)
@@ -381,7 +373,13 @@ static void sam_dfll_configure(const struct sam_dfll_config_s *config)
       regval |= OSCCTRL_DFLLCTRLB_CCDIS;
     }
 
-  if (config->waitlock)
+  /* NOTE: Do NOT set WAITLOCK in open-loop mode (BOARD_DFLL_MODE=FALSE).
+   * In open loop, WAITLOCK=1 can prevent the DFLL from outputting a clock
+   * until a (possibly non-occurring) stable condition is met. Keep it 0
+   * unless using closed-loop mode where USB lock is guaranteed.
+   */
+
+  if (config->waitlock && config->mode)
     {
       regval |= OSCCTRL_DFLLCTRLB_WAITLOCK;
     }
@@ -390,8 +388,6 @@ static void sam_dfll_configure(const struct sam_dfll_config_s *config)
   while ((getreg8(SAM_OSCCTRL_DFLLSYNC) & OSCCTRL_DFLLSYNC_DFLLCTRLB) != 0)
     {
     }
-
-  /* Enable DFLL */
 
   regval = OSCCTRL_DFLLCTRLA_ENABLE;
   if (config->runstdby)
@@ -409,7 +405,7 @@ static void sam_dfll_configure(const struct sam_dfll_config_s *config)
     {
     }
 
-  /* Wait for DFLL lock if in closed-loop mode */
+  /* Only wait for DFLL lock in closed-loop mode */
 
   if (config->mode)
     {
@@ -430,15 +426,11 @@ static void sam_dpll_configure(int dpll,
       return;
     }
 
-  /* Disable DPLL before configuring */
-
   putreg8(0, SAM_OSCCTRL_DPLLCTRLA(dpll));
   while ((getreg32(SAM_OSCCTRL_DPLLSYNCBUSY(dpll)) &
           OSCCTRL_DPLLSYNCBUSY_ENABLE) != 0)
     {
     }
-
-  /* Set DPLL ratio: LDR and LDRFRAC */
 
   regval = ((uint32_t)config->ldrint << OSCCTRL_DPLLRATIO_LDR_SHIFT) |
            ((uint32_t)config->ldrfrac << OSCCTRL_DPLLRATIO_LDRFRAC_SHIFT);
@@ -447,8 +439,6 @@ static void sam_dpll_configure(int dpll,
           OSCCTRL_DPLLSYNCBUSY_DPLLRATIO) != 0)
     {
     }
-
-  /* Configure CTRLB: reference clock, filter, lock time, divider */
 
   regval = (config->filter << OSCCTRL_DPLLCTRLB_FILTER_SHIFT) |
            (config->refclk << OSCCTRL_DPLLCTRLB_REFCLK_SHIFT) |
@@ -473,8 +463,6 @@ static void sam_dpll_configure(int dpll,
 
   putreg32(regval, SAM_OSCCTRL_DPLLCTRLB(dpll));
 
-  /* Enable DPLL */
-
   regval = OSCCTRL_DPLLCTRLA_ENABLE;
   if (config->runstdby)
     {
@@ -492,8 +480,6 @@ static void sam_dpll_configure(int dpll,
     {
     }
 
-  /* Wait for DPLL lock and clock ready */
-
   while ((getreg32(SAM_OSCCTRL_DPLLSTATUS(dpll)) &
           (OSCCTRL_DPLLSTATUS_LOCK | OSCCTRL_DPLLSTATUS_CLKRDY)) !=
          (OSCCTRL_DPLLSTATUS_LOCK | OSCCTRL_DPLLSTATUS_CLKRDY))
@@ -509,31 +495,31 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
 {
   int i;
 
-  /* Set flash wait states for target frequency */
-  /* CZCA90: No NVMCTRL. FCR manages flash wait states automatically.
- * At 300 MHz with VDDREG=1.8V, FCR sets appropriate wait states. */
-  // putreg32(NVMCTRL_CTRLA_RWS(config->waitstates) | NVMCTRL_CTRLA_AUTOWS,
-  //          SAM_NVMCTRL_CTRLA);
+  /* PIC32CZ CA90: No NVMCTRL – FCR manages flash wait states automatically.
+   * Do NOT write to SAM_NVMCTRL_CTRLA (that peripheral does not exist here).
+   */
 
-  /* Configure XOSC32K if needed */
+  /* 1. Configure XOSC32K if needed */
 
 #if BOARD_HAVE_XOSC32K != 0
   sam_xosc32k_configure(&config->xosc32k);
 #endif
 
-  /* Configure XOSC0 (MEMS oscillator on CA90 Curiosity Ultra) */
+  /* 2. Configure XOSC0 (12 MHz MEMS oscillator on CA90 Curiosity Ultra) */
 
 #if BOARD_HAVE_XOSC0 != 0
   sam_xosc_configure(0, &config->xosc0);
 #endif
 
-  /* Configure XOSC1 if needed */
+  /* 3. Configure XOSC1 if needed */
 
 #if BOARD_HAVE_XOSC1 != 0
   sam_xosc_configure(1, &config->xosc1);
 #endif
 
-  /* Configure GCLK set 1 (needed before DPLL, e.g., GCLK5 feeds DPLL0) */
+  /* 4. Configure GCLK set 1 (runs before DPLLs).
+   *    e.g. GCLK5 = XOSC0/2 = 6 MHz, used as DPLL0 reference.
+   */
 
   for (i = 0; i < SAM_GCLK_NGEN; i++)
     {
@@ -543,16 +529,46 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
         }
     }
 
-  /* Configure DFLL48M */
+  /* 5. Configure DFLL48M (open-loop for USB CRM) */
 
   sam_dfll_configure(&config->dfll);
 
-  /* Configure DPLL0 and DPLL1 */
+  /* 6. FIX: Route GCLK5 to DPLL0's GCLK reference peripheral channel
+   *    (GCLK_PCHCTRL[1] = DPLL0 reference) BEFORE enabling DPLL0.
+   *
+   *    Without this call, DPLL0 CTRLB.REFCLK=0 (GCLK source selected)
+   *    but GCLK_PCHCTRL[1] is never connected, so DPLL0 has no reference
+   *    clock and the DPLLSTATUS.LOCK wait loop below hangs forever.
+   *
+   *    Harmony plib_clk.c equivalent:
+   *      GCLK_REGS->GCLK_PCHCTRL[1] = GCLK_PCHCTRL_GEN(5) |
+   *                                    GCLK_PCHCTRL_CHEN(1);
+   */
+
+  if (config->dpll[0].enable &&
+      config->dpll[0].refclk == 0 /* GCLK reference */)
+    {
+      sam_gclk_chan_enable(GCLK_CHAN_DPLL0_REF,
+                           config->dpll[0].gclk,
+                           false);
+    }
+
+  if (config->dpll[1].enable &&
+      config->dpll[1].refclk == 0)
+    {
+      sam_gclk_chan_enable(GCLK_CHAN_DPLL1_REF,
+                           config->dpll[1].gclk,
+                           false);
+    }
+
+  /* 7. Configure DPLL0 and DPLL1 (reference now connected above) */
 
   sam_dpll_configure(0, &config->dpll[0]);
   sam_dpll_configure(1, &config->dpll[1]);
 
-  /* Configure remaining GCLKs (set 2) */
+  /* 8. Configure remaining GCLKs (set 2: GCLK0 from DPLL0, GCLK1 from
+   *    DFLL, GCLK3 from OSCULP32K, etc.)
+   */
 
   for (i = 0; i < SAM_GCLK_NGEN; i++)
     {
@@ -562,7 +578,7 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
         }
     }
 
-  /* Set CPU clock divider */
+  /* 9. Set CPU clock divider (MCLK.CPUDIV = 1 → no division) */
 
   putreg8(config->cpudiv, SAM_MCLK_CPUDIV);
 }
