@@ -41,6 +41,16 @@
 #include "chip.h"
 #include "arm_internal.h"
 
+void my_hardfault(void)
+{
+  volatile int x = 0;
+
+  while (1)
+  {
+    x++;
+  }
+}
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -78,15 +88,12 @@ extern void exception_common(void);
 
 unsigned _vectors[] locate_data(".vectors") =
 {
-  /* Initial stack */
-
   IDLE_STACK,
-
-  /* Reset exception handler */
-
   (unsigned)&__start,
 
-  /* Vectors 2 - n point directly at the generic handler */
+  /* Force ALL core exceptions to our handler */
+  [2 ... 15] = (unsigned)&my_hardfault,
 
-  [2 ... (15 + ARMV7M_PERIPHERAL_INTERRUPTS)] = (unsigned)&exception_common
+  /* Keep IRQs normal */
+  [16 ... (15 + ARMV7M_PERIPHERAL_INTERRUPTS)] = (unsigned)&exception_common
 };

@@ -3,14 +3,15 @@
 /****************************************************************************
  * arch/arm/src/pic32czca90/hardware/sam_oscctrl.h
  *
- * PIC32CZ CA90 Oscillator Controller (OSCCTRL) – DS60001749K Section 18
+ * PIC32CZ CA90 Oscillator Controller (OSCCTRL)
  * Base: 0x44040000
  *
- * CORRECTED: Previous version had SAMD5x register offset order.
- * On CZCA90, XOSCCTRL0/1 come FIRST (0x0000, 0x0004), then
- * EVCTRL/INTENCLR/INTENSET/INTFLAG/STATUS at 0x0008+.
- * On SAMD5x the order was reversed. This caused XOSC enable writes
- * to hit the EVCTRL register instead — XOSC0 never started.
+ * Register offsets verified from PIC32CZ8110CA80208_DFP/component/oscctrl.h
+ *
+ * Clock strategy (Harmony-verified for CA90):
+ *   DFLL48M (free-running, 48 MHz) → PLL0 reference (REFSEL=2)
+ *   PLL0: REFDIV=12 → 4 MHz ref, FBDIV=225 → 900 MHz VCO, POSTDIV0=3 → 300 MHz
+ *   NOT DPLL0/DPLL1 (those are SAMD5x registers that do NOT exist on CA90)
  *
  ****************************************************************************/
 
@@ -20,183 +21,231 @@
 #include "hardware/sam_memorymap.h"
 
 /* =========================================================================
- * Register Offsets – DS60001749K Section 18.7
- * IMPORTANT: Order differs from SAMD5x
+ * Register Offsets – DFP verified
  * =========================================================================
  */
 
-/* XOSC Control – FIRST registers on CZCA90 */
-#define SAM_OSCCTRL_XOSCCTRL0_OFFSET    0x0000  /* External Osc 0 Control  */
-#define SAM_OSCCTRL_XOSCCTRL1_OFFSET    0x0004  /* External Osc 1 Control  */
-
-/* Event / Interrupt / Status – come AFTER XOSC on CZCA90 */
-#define SAM_OSCCTRL_EVCTRL_OFFSET       0x0008
-#define SAM_OSCCTRL_INTENCLR_OFFSET     0x000C
-#define SAM_OSCCTRL_INTENSET_OFFSET     0x0010
-#define SAM_OSCCTRL_INTFLAG_OFFSET      0x0014
-#define SAM_OSCCTRL_STATUS_OFFSET       0x0018
-
-/* DFLL */
-#define SAM_OSCCTRL_DFLLCTRLA_OFFSET    0x001C
-#define SAM_OSCCTRL_DFLLCTRLB_OFFSET    0x0020
-#define SAM_OSCCTRL_DFLLVAL_OFFSET      0x0024
-#define SAM_OSCCTRL_DFLLMUL_OFFSET      0x0028
-#define SAM_OSCCTRL_DFLLSYNC_OFFSET     0x002C
-
-/* DPLL0 */
-#define SAM_OSCCTRL_DPLL0CTRLA_OFFSET   0x0030
-#define SAM_OSCCTRL_DPLL0RATIO_OFFSET   0x0034
-#define SAM_OSCCTRL_DPLL0CTRLB_OFFSET   0x0038
-#define SAM_OSCCTRL_DPLL0SYNCBUSY_OFFSET 0x003C
-#define SAM_OSCCTRL_DPLL0STATUS_OFFSET  0x0040
-
-/* DPLL1 */
-#define SAM_OSCCTRL_DPLL1CTRLA_OFFSET   0x0044
-#define SAM_OSCCTRL_DPLL1RATIO_OFFSET   0x0048
-#define SAM_OSCCTRL_DPLL1CTRLB_OFFSET   0x004C
-#define SAM_OSCCTRL_DPLL1SYNCBUSY_OFFSET 0x0050
-#define SAM_OSCCTRL_DPLL1STATUS_OFFSET  0x0054
+#define SAM_OSCCTRL_EVCTRL_OFFSET           0x0000  /* Event Control (8-bit) */
+#define SAM_OSCCTRL_INTENCLR_OFFSET         0x0004  /* Interrupt Enable Clr  */
+#define SAM_OSCCTRL_INTENSET_OFFSET         0x0008  /* Interrupt Enable Set  */
+#define SAM_OSCCTRL_INTFLAG_OFFSET          0x000C  /* Interrupt Flag        */
+#define SAM_OSCCTRL_STATUS_OFFSET           0x0010  /* Status (32-bit)       */
+#define SAM_OSCCTRL_XOSCCTRLA_OFFSET        0x0014  /* XOSC Control A        */
+#define SAM_OSCCTRL_DFLLCTRLA_OFFSET        0x002C  /* DFLL48M Control A     */
+#define SAM_OSCCTRL_DFLLCTRLB_OFFSET        0x0030  /* DFLL48M Control B     */
+#define SAM_OSCCTRL_DFLLVAL_OFFSET          0x0034  /* DFLL48M Value         */
+#define SAM_OSCCTRL_DFLLMUL_OFFSET          0x0038  /* DFLL48M Multiplier    */
+#define SAM_OSCCTRL_DFLLSYNC_OFFSET         0x003C  /* DFLL48M Sync          */
+#define SAM_OSCCTRL_PLL0CTRL_OFFSET         0x0040  /* PLL0 Control          */
+#define SAM_OSCCTRL_PLL0FBDIV_OFFSET        0x0044  /* PLL0 Feedback Divider */
+#define SAM_OSCCTRL_PLL0REFDIV_OFFSET       0x0048  /* PLL0 Reference Divider*/
+#define SAM_OSCCTRL_PLL0POSTDIVA_OFFSET     0x004C  /* PLL0 Post-Divider A   */
+#define SAM_OSCCTRL_PLL1CTRL_OFFSET         0x0054  /* PLL1 Control          */
+#define SAM_OSCCTRL_FRACDIV0_OFFSET         0x006C  /* Fractional Divider 0  */
+#define SAM_OSCCTRL_SYNCBUSY_OFFSET         0x0078  /* Sync Busy (32-bit)    */
 
 /* =========================================================================
  * Register Addresses
  * =========================================================================
  */
 
-#define SAM_OSCCTRL_XOSCCTRL0       (SAM_OSCCTRL_BASE + SAM_OSCCTRL_XOSCCTRL0_OFFSET)
-#define SAM_OSCCTRL_XOSCCTRL1       (SAM_OSCCTRL_BASE + SAM_OSCCTRL_XOSCCTRL1_OFFSET)
-#define SAM_OSCCTRL_EVCTRL          (SAM_OSCCTRL_BASE + SAM_OSCCTRL_EVCTRL_OFFSET)
-#define SAM_OSCCTRL_INTENCLR        (SAM_OSCCTRL_BASE + SAM_OSCCTRL_INTENCLR_OFFSET)
-#define SAM_OSCCTRL_INTENSET        (SAM_OSCCTRL_BASE + SAM_OSCCTRL_INTENSET_OFFSET)
-#define SAM_OSCCTRL_INTFLAG         (SAM_OSCCTRL_BASE + SAM_OSCCTRL_INTFLAG_OFFSET)
-#define SAM_OSCCTRL_STATUS          (SAM_OSCCTRL_BASE + SAM_OSCCTRL_STATUS_OFFSET)
-#define SAM_OSCCTRL_DFLLCTRLA       (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLCTRLA_OFFSET)
-#define SAM_OSCCTRL_DFLLCTRLB       (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLCTRLB_OFFSET)
-#define SAM_OSCCTRL_DFLLVAL         (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLVAL_OFFSET)
-#define SAM_OSCCTRL_DFLLMUL         (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLMUL_OFFSET)
-#define SAM_OSCCTRL_DFLLSYNC        (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLSYNC_OFFSET)
+#define SAM_OSCCTRL_EVCTRL       (SAM_OSCCTRL_BASE + SAM_OSCCTRL_EVCTRL_OFFSET)
+#define SAM_OSCCTRL_INTENCLR     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_INTENCLR_OFFSET)
+#define SAM_OSCCTRL_INTENSET     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_INTENSET_OFFSET)
+#define SAM_OSCCTRL_INTFLAG      (SAM_OSCCTRL_BASE + SAM_OSCCTRL_INTFLAG_OFFSET)
+#define SAM_OSCCTRL_STATUS       (SAM_OSCCTRL_BASE + SAM_OSCCTRL_STATUS_OFFSET)
+#define SAM_OSCCTRL_XOSCCTRLA    (SAM_OSCCTRL_BASE + SAM_OSCCTRL_XOSCCTRLA_OFFSET)
+#define SAM_OSCCTRL_DFLLCTRLA    (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLCTRLA_OFFSET)
+#define SAM_OSCCTRL_DFLLCTRLB    (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLCTRLB_OFFSET)
+#define SAM_OSCCTRL_DFLLVAL      (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLVAL_OFFSET)
+#define SAM_OSCCTRL_DFLLMUL      (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLMUL_OFFSET)
+#define SAM_OSCCTRL_DFLLSYNC     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLSYNC_OFFSET)
+#define SAM_OSCCTRL_PLL0CTRL     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL0CTRL_OFFSET)
+#define SAM_OSCCTRL_PLL0FBDIV    (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL0FBDIV_OFFSET)
+#define SAM_OSCCTRL_PLL0REFDIV   (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL0REFDIV_OFFSET)
+#define SAM_OSCCTRL_PLL0POSTDIVA (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL0POSTDIVA_OFFSET)
+#define SAM_OSCCTRL_PLL1CTRL     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL1CTRL_OFFSET)
+#define SAM_OSCCTRL_FRACDIV0     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_FRACDIV0_OFFSET)
+#define SAM_OSCCTRL_SYNCBUSY     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_SYNCBUSY_OFFSET)
 
-/* Indexed accessors for DPLL0/1 (stride 0x14 between instances) */
-#define SAM_OSCCTRL_XOSCCTRL(n)     (SAM_OSCCTRL_BASE + \
-                                     SAM_OSCCTRL_XOSCCTRL0_OFFSET + (n)*4)
-#define SAM_OSCCTRL_DPLLCTRLA(n)    (SAM_OSCCTRL_BASE + \
-                                     SAM_OSCCTRL_DPLL0CTRLA_OFFSET + (n)*0x14)
-#define SAM_OSCCTRL_DPLLRATIO(n)    (SAM_OSCCTRL_BASE + \
-                                     SAM_OSCCTRL_DPLL0RATIO_OFFSET + (n)*0x14)
-#define SAM_OSCCTRL_DPLLCTRLB(n)    (SAM_OSCCTRL_BASE + \
-                                     SAM_OSCCTRL_DPLL0CTRLB_OFFSET + (n)*0x14)
-#define SAM_OSCCTRL_DPLLSYNCBUSY(n) (SAM_OSCCTRL_BASE + \
-                                     SAM_OSCCTRL_DPLL0SYNCBUSY_OFFSET + (n)*0x14)
-#define SAM_OSCCTRL_DPLLSTATUS(n)   (SAM_OSCCTRL_BASE + \
-                                     SAM_OSCCTRL_DPLL0STATUS_OFFSET + (n)*0x14)
+/* CA90 has a single XOSC (XOSCCTRLA). Aliases for code using XOSC0 name. */
+
+#define SAM_OSCCTRL_XOSCCTRL0       SAM_OSCCTRL_XOSCCTRLA
+#define SAM_OSCCTRL_XOSCCTRL(n)     SAM_OSCCTRL_XOSCCTRLA
 
 /* =========================================================================
- * XOSCCTRL Bit Definitions (32-bit)
+ * STATUS Register Bits (offset 0x0010, 32-bit)
  * =========================================================================
  */
 
-#define OSCCTRL_XOSCCTRL_ENABLE         (1 << 1)
-#define OSCCTRL_XOSCCTRL_XTALEN         (1 << 2)   /* 0=ext clock, 1=crystal */
-#define OSCCTRL_XOSCCTRL_CFDEN          (1 << 3)
-#define OSCCTRL_XOSCCTRL_SWBEN          (1 << 4)
-#define OSCCTRL_XOSCCTRL_RUNSTDBY       (1 << 6)
-#define OSCCTRL_XOSCCTRL_ONDEMAND       (1 << 7)
-#define OSCCTRL_XOSCCTRL_LOWBUFGAIN     (1 << 8)
-#define OSCCTRL_XOSCCTRL_IPTAT_SHIFT    9
-#define OSCCTRL_XOSCCTRL_IPTAT_MASK     (0x3 << OSCCTRL_XOSCCTRL_IPTAT_SHIFT)
-#define OSCCTRL_XOSCCTRL_IMULT_SHIFT    11
-#define OSCCTRL_XOSCCTRL_IMULT_MASK     (0xf << OSCCTRL_XOSCCTRL_IMULT_SHIFT)
-#define OSCCTRL_XOSCCTRL_ENALC          (1 << 15)
-#define OSCCTRL_XOSCCTRL_CFDEN_BIT      (1 << 16)
-#define OSCCTRL_XOSCCTRL_SWBEN_BIT      (1 << 17)
-#define OSCCTRL_XOSCCTRL_STARTUP_SHIFT  20
-#define OSCCTRL_XOSCCTRL_STARTUP_MASK   (0xf << OSCCTRL_XOSCCTRL_STARTUP_SHIFT)
+#define OSCCTRL_STATUS_XOSCRDY0          (1u << 0)  /* XOSC ready            */
+#define OSCCTRL_STATUS_XOSCRDY1          (1u << 0)  /* alias (single XOSC)   */
+#define OSCCTRL_STATUS_XOSCFAIL0         (1u << 2)  /* XOSC failure          */
+#define OSCCTRL_STATUS_DFLLRDY           (1u << 8)  /* DFLL48M ready         */
+#define OSCCTRL_STATUS_DFLLOOB           (1u << 9)
+#define OSCCTRL_STATUS_DFLLLCKF          (1u << 10)
+#define OSCCTRL_STATUS_DFLLLCKC          (1u << 11)
+#define OSCCTRL_STATUS_PLL0LOCK          (1u << 24) /* PLL0 locked           */
+#define OSCCTRL_STATUS_PLL1LOCK          (1u << 25) /* PLL1 locked           */
 
 /* =========================================================================
- * STATUS Bit Definitions
+ * SYNCBUSY Register Bits (offset 0x0078, 32-bit)
  * =========================================================================
  */
 
-#define OSCCTRL_STATUS_XOSCRDY0         (1 << 0)
-#define OSCCTRL_STATUS_XOSCRDY1         (1 << 1)
-#define OSCCTRL_STATUS_XOSCFAIL0        (1 << 2)
-#define OSCCTRL_STATUS_XOSCFAIL1        (1 << 3)
-#define OSCCTRL_STATUS_DFLLRDY          (1 << 8)
-#define OSCCTRL_STATUS_DFLLOOB          (1 << 9)
-#define OSCCTRL_STATUS_DFLLLCKF         (1 << 10)
-#define OSCCTRL_STATUS_DFLLLCKC         (1 << 11)
-#define OSCCTRL_STATUS_DPLLLCKR0        (1 << 16)
-#define OSCCTRL_STATUS_DPLLLCKF0        (1 << 17)
-#define OSCCTRL_STATUS_DPLLTO0          (1 << 18)
-#define OSCCTRL_STATUS_DPLLLDRTO0       (1 << 19)
-#define OSCCTRL_STATUS_DPLLLCKR1        (1 << 24)
-#define OSCCTRL_STATUS_DPLLLCKF1        (1 << 25)
+#define OSCCTRL_SYNCBUSY_DFLLCTRLA       (1u << 0)
+#define OSCCTRL_SYNCBUSY_DFLLCTRLB       (1u << 1)
+#define OSCCTRL_SYNCBUSY_DFLLVAL         (1u << 2)
+#define OSCCTRL_SYNCBUSY_DFLLMUL         (1u << 3)
+#define OSCCTRL_SYNCBUSY_PLL0CTRL        (1u << 4)
+#define OSCCTRL_SYNCBUSY_FRACDIV0        (1u << 6)
 
 /* =========================================================================
- * DFLL Bit Definitions
+ * XOSCCTRLA Register Bits (offset 0x0014, 32-bit)
  * =========================================================================
  */
 
-#define OSCCTRL_DFLLCTRLA_ENABLE        (1 << 1)
-#define OSCCTRL_DFLLCTRLA_RUNSTDBY      (1 << 6)
-#define OSCCTRL_DFLLCTRLA_ONDEMAND      (1 << 7)
-
-#define OSCCTRL_DFLLCTRLB_MODE          (1 << 0)
-#define OSCCTRL_DFLLCTRLB_STABLE        (1 << 1)
-#define OSCCTRL_DFLLCTRLB_LLAW          (1 << 2)
-#define OSCCTRL_DFLLCTRLB_USBCRM        (1 << 3)
-#define OSCCTRL_DFLLCTRLB_CCDIS         (1 << 4)
-#define OSCCTRL_DFLLCTRLB_QLDIS         (1 << 5)
-#define OSCCTRL_DFLLCTRLB_BPLCKC        (1 << 6)
-#define OSCCTRL_DFLLCTRLB_WAITLOCK      (1 << 7)
-
-#define OSCCTRL_DFLLMUL_MUL_SHIFT       0
-#define OSCCTRL_DFLLMUL_MUL_MASK        (0xffff << OSCCTRL_DFLLMUL_MUL_SHIFT)
-#define OSCCTRL_DFLLMUL_FSTEP_SHIFT     16
-#define OSCCTRL_DFLLMUL_FSTEP_MASK      (0xff << OSCCTRL_DFLLMUL_FSTEP_SHIFT)
-#define OSCCTRL_DFLLMUL_CSTEP_SHIFT     26
-#define OSCCTRL_DFLLMUL_CSTEP_MASK      (0x3f << OSCCTRL_DFLLMUL_CSTEP_SHIFT)
-
-#define OSCCTRL_DFLLSYNC_ENABLE         (1 << 1)
-#define OSCCTRL_DFLLSYNC_DFLLCTRLB      (1 << 2)
-#define OSCCTRL_DFLLSYNC_DFLLVAL        (1 << 3)
-#define OSCCTRL_DFLLSYNC_DFLLMUL        (1 << 4)
+#define OSCCTRL_XOSCCTRL_ENABLE          (1u << 1)
+#define OSCCTRL_XOSCCTRL_XTALEN          (1u << 2) /* 0=ext clock, 1=crystal */
+#define OSCCTRL_XOSCCTRL_CFDEN           (1u << 3)
+#define OSCCTRL_XOSCCTRL_SWBEN           (1u << 4)
+#define OSCCTRL_XOSCCTRL_RUNSTDBY        (1u << 6)
+#define OSCCTRL_XOSCCTRL_ONDEMAND        (1u << 7)
+#define OSCCTRL_XOSCCTRL_LOWBUFGAIN      (1u << 8)
+#define OSCCTRL_XOSCCTRL_IPTAT_SHIFT     9
+#define OSCCTRL_XOSCCTRL_IPTAT_MASK      (0x3u << OSCCTRL_XOSCCTRL_IPTAT_SHIFT)
+#define OSCCTRL_XOSCCTRL_IMULT_SHIFT     11
+#define OSCCTRL_XOSCCTRL_IMULT_MASK      (0xfu << OSCCTRL_XOSCCTRL_IMULT_SHIFT)
+#define OSCCTRL_XOSCCTRL_ENALC           (1u << 15)
+#define OSCCTRL_XOSCCTRL_STARTUP_SHIFT   20
+#define OSCCTRL_XOSCCTRL_STARTUP_MASK    (0xfu << OSCCTRL_XOSCCTRL_STARTUP_SHIFT)
 
 /* =========================================================================
- * DPLL Bit Definitions
+ * DFLL48M Register Bits
  * =========================================================================
  */
 
-#define OSCCTRL_DPLLCTRLA_ENABLE        (1 << 1)
-#define OSCCTRL_DPLLCTRLA_RUNSTDBY      (1 << 6)
-#define OSCCTRL_DPLLCTRLA_ONDEMAND      (1 << 7)
+#define OSCCTRL_DFLLCTRLA_ENABLE         (1u << 1)
+#define OSCCTRL_DFLLCTRLA_RUNSTDBY       (1u << 6)
+#define OSCCTRL_DFLLCTRLA_ONDEMAND       (1u << 7)
 
-#define OSCCTRL_DPLLRATIO_LDR_SHIFT     0
-#define OSCCTRL_DPLLRATIO_LDR_MASK      (0x1fff << OSCCTRL_DPLLRATIO_LDR_SHIFT)
-#define OSCCTRL_DPLLRATIO_LDRFRAC_SHIFT 16
-#define OSCCTRL_DPLLRATIO_LDRFRAC_MASK  (0x1f << OSCCTRL_DPLLRATIO_LDRFRAC_SHIFT)
+#define OSCCTRL_DFLLCTRLB_MODE           (1u << 0) /* 0=open loop */
+#define OSCCTRL_DFLLCTRLB_STABLE         (1u << 1)
+#define OSCCTRL_DFLLCTRLB_LLAW           (1u << 2)
+#define OSCCTRL_DFLLCTRLB_USBCRM         (1u << 3)
+#define OSCCTRL_DFLLCTRLB_CCDIS          (1u << 4)
+#define OSCCTRL_DFLLCTRLB_QLDIS          (1u << 5)
+#define OSCCTRL_DFLLCTRLB_BPLCKC         (1u << 6)
+#define OSCCTRL_DFLLCTRLB_WAITLOCK       (1u << 7)
 
-#define OSCCTRL_DPLLCTRLB_FILTER_SHIFT  0
-#define OSCCTRL_DPLLCTRLB_FILTER_MASK   (0xf << OSCCTRL_DPLLCTRLB_FILTER_SHIFT)
-#define OSCCTRL_DPLLCTRLB_WUF           (1 << 4)
-#define OSCCTRL_DPLLCTRLB_REFCLK_SHIFT  5
-#define OSCCTRL_DPLLCTRLB_REFCLK_MASK   (0x7 << OSCCTRL_DPLLCTRLB_REFCLK_SHIFT)
-#  define OSCCTRL_DPLLCTRLB_REFCLK_GCLK   (0 << OSCCTRL_DPLLCTRLB_REFCLK_SHIFT)
-#  define OSCCTRL_DPLLCTRLB_REFCLK_XOSC32 (1 << OSCCTRL_DPLLCTRLB_REFCLK_SHIFT)
-#  define OSCCTRL_DPLLCTRLB_REFCLK_XOSC0  (2 << OSCCTRL_DPLLCTRLB_REFCLK_SHIFT)
-#  define OSCCTRL_DPLLCTRLB_REFCLK_XOSC1  (3 << OSCCTRL_DPLLCTRLB_REFCLK_SHIFT)
-#define OSCCTRL_DPLLCTRLB_LTIME_SHIFT   8
-#define OSCCTRL_DPLLCTRLB_LTIME_MASK    (0x7 << OSCCTRL_DPLLCTRLB_LTIME_SHIFT)
-#define OSCCTRL_DPLLCTRLB_LBYPASS       (1 << 11)
+#define OSCCTRL_DFLLMUL_MUL_SHIFT        0
+#define OSCCTRL_DFLLMUL_MUL_MASK         (0xffffu << OSCCTRL_DFLLMUL_MUL_SHIFT)
+#define OSCCTRL_DFLLMUL_FSTEP_SHIFT      16
+#define OSCCTRL_DFLLMUL_FSTEP_MASK       (0xffu << OSCCTRL_DFLLMUL_FSTEP_SHIFT)
+#define OSCCTRL_DFLLMUL_CSTEP_SHIFT      26
+#define OSCCTRL_DFLLMUL_CSTEP_MASK       (0x3fu << OSCCTRL_DFLLMUL_CSTEP_SHIFT)
+
+#define OSCCTRL_DFLLSYNC_ENABLE          (1u << 1)
+#define OSCCTRL_DFLLSYNC_DFLLCTRLB       (1u << 2)
+#define OSCCTRL_DFLLSYNC_DFLLVAL         (1u << 3)
+#define OSCCTRL_DFLLSYNC_DFLLMUL         (1u << 4)
+
+/* =========================================================================
+ * PLL0CTRL Register Bits (offset 0x0040, 32-bit)
+ * Harmony-verified: REFSEL=2 (DFLL48M), BWSEL=1, ENABLE=1
+ * =========================================================================
+ */
+
+#define OSCCTRL_PLL0CTRL_ENABLE          (1u << 1)
+#define OSCCTRL_PLL0CTRL_REFSEL_SHIFT    8
+#define OSCCTRL_PLL0CTRL_REFSEL_MASK     (0x7u << OSCCTRL_PLL0CTRL_REFSEL_SHIFT)
+#  define OSCCTRL_PLL0CTRL_REFSEL_GCLK   (0u << OSCCTRL_PLL0CTRL_REFSEL_SHIFT)
+#  define OSCCTRL_PLL0CTRL_REFSEL_XOSC   (1u << OSCCTRL_PLL0CTRL_REFSEL_SHIFT)
+#  define OSCCTRL_PLL0CTRL_REFSEL_DFLL   (2u << OSCCTRL_PLL0CTRL_REFSEL_SHIFT)
+#define OSCCTRL_PLL0CTRL_BWSEL_SHIFT     11
+#define OSCCTRL_PLL0CTRL_BWSEL_MASK      (0x7u << OSCCTRL_PLL0CTRL_BWSEL_SHIFT)
+#  define OSCCTRL_PLL0CTRL_BWSEL(v)      ((uint32_t)(v) << OSCCTRL_PLL0CTRL_BWSEL_SHIFT)
+
+/* =========================================================================
+ * PLL0FBDIV Register (offset 0x0044, 32-bit)
+ * FBDIV=225: VCO = 4 MHz × 225 = 900 MHz
+ * =========================================================================
+ */
+
+#define OSCCTRL_PLL0FBDIV_MASK           0x00000fffu
+#  define OSCCTRL_PLL0FBDIV(v)           ((uint32_t)(v) & OSCCTRL_PLL0FBDIV_MASK)
+
+/* =========================================================================
+ * PLL0REFDIV Register (offset 0x0048, 32-bit)
+ * REFDIV=12: 48 MHz / 12 = 4 MHz reference
+ * =========================================================================
+ */
+
+#define OSCCTRL_PLL0REFDIV_MASK          0x000003ffu
+#  define OSCCTRL_PLL0REFDIV(v)          ((uint32_t)(v) & OSCCTRL_PLL0REFDIV_MASK)
+
+/* =========================================================================
+ * PLL0POSTDIVA Register (offset 0x004C, 32-bit)
+ * POSTDIV0=3: 900 MHz / 3 = 300 MHz output
+ * OUTEN0=1: enable output
+ * =========================================================================
+ */
+
+#define OSCCTRL_PLL0POSTDIVA_POSTDIV0_MASK  0x0000003fu
+#  define OSCCTRL_PLL0POSTDIVA_POSTDIV0(v)  \
+     ((uint32_t)(v) & OSCCTRL_PLL0POSTDIVA_POSTDIV0_MASK)
+#define OSCCTRL_PLL0POSTDIVA_OUTEN0         (1u << 7)
+
+/* =========================================================================
+ * FRACDIV0 Register (offset 0x006C, 32-bit)
+ * Set to 0 (integer-only, no fractional division)
+ * =========================================================================
+ */
+
+#define OSCCTRL_FRACDIV0_REMDIV_SHIFT    0
+#define OSCCTRL_FRACDIV0_REMDIV_MASK     (0xfffu << OSCCTRL_FRACDIV0_REMDIV_SHIFT)
+#  define OSCCTRL_FRACDIV0_REMDIV(v)     ((uint32_t)(v) & OSCCTRL_FRACDIV0_REMDIV_MASK)
+#define OSCCTRL_FRACDIV0_INTDIV_SHIFT    16
+#define OSCCTRL_FRACDIV0_INTDIV_MASK     (0xffu << OSCCTRL_FRACDIV0_INTDIV_SHIFT)
+#  define OSCCTRL_FRACDIV0_INTDIV(v)     ((uint32_t)(v) << OSCCTRL_FRACDIV0_INTDIV_SHIFT)
+
+/* =========================================================================
+ * Legacy DPLL compatibility aliases
+ *
+ * CA90 has NO DPLL0/DPLL1 registers. The "DPLL" name in older code actually
+ * refers to the SAMD5x DPLL which is a completely different IP block from
+ * the CA90 PLL0.
+ *
+ * These aliases are provided ONLY to prevent compilation errors. The actual
+ * DPLL-configure path is disabled via BOARD_DPLL0_ENABLE=FALSE in board.h,
+ * so sam_dpll_configure() returns immediately without touching hardware.
+ * =========================================================================
+ */
+
+#define SAM_OSCCTRL_DPLLCTRLA(n)         SAM_OSCCTRL_PLL0CTRL
+#define SAM_OSCCTRL_DPLLRATIO(n)         SAM_OSCCTRL_PLL0FBDIV
+#define SAM_OSCCTRL_DPLLCTRLB(n)         SAM_OSCCTRL_PLL0REFDIV
+#define SAM_OSCCTRL_DPLLSYNCBUSY(n)      SAM_OSCCTRL_SYNCBUSY
+#define SAM_OSCCTRL_DPLLSTATUS(n)        SAM_OSCCTRL_STATUS
+
+#define OSCCTRL_DPLLCTRLA_ENABLE         OSCCTRL_PLL0CTRL_ENABLE
+#define OSCCTRL_DPLLCTRLA_RUNSTDBY       0u
+#define OSCCTRL_DPLLCTRLA_ONDEMAND       0u
+#define OSCCTRL_DPLLSYNCBUSY_ENABLE      OSCCTRL_SYNCBUSY_PLL0CTRL
+#define OSCCTRL_DPLLSYNCBUSY_DPLLRATIO   0u
+#define OSCCTRL_DPLLRATIO_LDR_SHIFT      0
+#define OSCCTRL_DPLLRATIO_LDR_MASK       0u
+#define OSCCTRL_DPLLRATIO_LDRFRAC_SHIFT  16
+#define OSCCTRL_DPLLRATIO_LDRFRAC_MASK   0u
+#define OSCCTRL_DPLLCTRLB_FILTER_SHIFT   0
+#define OSCCTRL_DPLLCTRLB_REFCLK_SHIFT   5
+#define OSCCTRL_DPLLCTRLB_LTIME_SHIFT    8
 #define OSCCTRL_DPLLCTRLB_DCOFILTER_SHIFT 12
-#define OSCCTRL_DPLLCTRLB_DCOFILTER_MASK  (0x7 << OSCCTRL_DPLLCTRLB_DCOFILTER_SHIFT)
-#define OSCCTRL_DPLLCTRLB_DCOEN         (1 << 15)
-#define OSCCTRL_DPLLCTRLB_DIV_SHIFT     16
-#define OSCCTRL_DPLLCTRLB_DIV_MASK      (0x7ff << OSCCTRL_DPLLCTRLB_DIV_SHIFT)
-
-#define OSCCTRL_DPLLSYNCBUSY_ENABLE     (1 << 1)
-#define OSCCTRL_DPLLSYNCBUSY_DPLLRATIO  (1 << 2)
-
-#define OSCCTRL_DPLLSTATUS_LOCK         (1 << 0)
-#define OSCCTRL_DPLLSTATUS_CLKRDY       (1 << 1)
+#define OSCCTRL_DPLLCTRLB_DIV_SHIFT      16
+#define OSCCTRL_DPLLCTRLB_DCOEN          0u
+#define OSCCTRL_DPLLCTRLB_LBYPASS        0u
+#define OSCCTRL_DPLLCTRLB_WUF            0u
+#define OSCCTRL_DPLLSTATUS_LOCK          OSCCTRL_STATUS_PLL0LOCK
+#define OSCCTRL_DPLLSTATUS_CLKRDY        OSCCTRL_STATUS_PLL0LOCK
 
 #endif /* __ARCH_ARM_SRC_PIC32CZCA90_HARDWARE_SAM_OSCCTRL_H */

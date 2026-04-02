@@ -54,22 +54,35 @@
 #define PORT_FLAG_DRVSTR    (1 << 4)
 
 /* =========================================================================
- * SERCOM4 – Console UART (PKoB4 VCP)
+ * SERCOM1 – Console UART (PKoB4 VCP on J700)
  *
- * CORRECTED from PB08/PB09 to PC21/PC22.
- * DS70005522C schematic net names:
- *   P17_PC21_EXT2_SERCOM4_PAD0 → PKoB4 APP_VCP_RX (board TX)
- *   P18_PC22_EXT2_SERCOM4_PAD1 → PKoB4 APP_VCP_TX (board RX)
+ * GROUND TRUTH: Harmony usart_echo_blocking example (confirmed working on
+ * CA90 board) uses SERCOM1 with PC04 (TX, PAD0) and PC07 (RX, PAD3),
+ * peripheral function D (value 3). TXPO=0, RXPO=3.
  *
- * PMUX function E (value 4) = SERCOM4 on Port C pins 21/22
- * This is verified from DS70005522C Table 2-11 and schematic page 21.
+ * DS70005522C signal names:
+ *   PC04 → SERCOM1 PAD0 → PKoB4 APP_VCP_TX (board TX to host RX)
+ *   PC07 → SERCOM1 PAD3 → PKoB4 APP_VCP_RX (board RX from host TX)
+ * =========================================================================
+ */
+
+#define PORT_SERCOM1_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(4) | \
+                             PORT_FLAG_PMUXEN)                /* PC04 TX */
+#define PORT_SERCOM1_PAD3   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(7) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PC07 RX */
+
+/* =========================================================================
+ * SERCOM4 – EXT2 expansion connector (NOT PKOB4 VCP)
+ *
+ * PC21 (PAD0) and PC22 (PAD1) are EXT2 header pins. The PKOB4 VCP is
+ * on SERCOM1 (PC04/PC07) — see above.
  * =========================================================================
  */
 
 #define PORT_SERCOM4_PAD0   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(21) | \
-                             PORT_FLAG_PMUXEN)                /* PC21 TX */
+                             PORT_FLAG_PMUXEN)                /* PC21 EXT2 */
 #define PORT_SERCOM4_PAD1   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(22) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PC22 RX */
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PC22 EXT2 */
 
 /* =========================================================================
  * SERCOM0 – PA04(TX)/PA05(RX), function D
@@ -79,16 +92,6 @@
 #define PORT_SERCOM0_PAD0   (PORT_PORTA | PORT_FUNC(3) | PORT_PIN(4) | \
                              PORT_FLAG_PMUXEN)
 #define PORT_SERCOM0_PAD1   (PORT_PORTA | PORT_FUNC(3) | PORT_PIN(5) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
-
-/* =========================================================================
- * SERCOM1 – PA16(TX)/PA17(RX), function C
- * =========================================================================
- */
-
-#define PORT_SERCOM1_PAD0   (PORT_PORTA | PORT_FUNC(2) | PORT_PIN(16) | \
-                             PORT_FLAG_PMUXEN)
-#define PORT_SERCOM1_PAD1   (PORT_PORTA | PORT_FUNC(2) | PORT_PIN(17) | \
                              PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
 
 /* =========================================================================

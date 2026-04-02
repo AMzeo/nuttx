@@ -488,6 +488,80 @@ static void sam_dpll_configure(int dpll,
 }
 
 /****************************************************************************
+ * Name: sam_pll0_init
+ *
+ * Description:
+ *   Initialize PLL0 to 300 MHz using DFLL48M as reference.
+ *   Sequence verified from Harmony plib_clock.c for CA80/CA90.
+ *
+ *   Clock math:
+ *     DFLL48M (48 MHz) / REFDIV(12) = 4 MHz ref
+ *     4 MHz * FBDIV(225) = 900 MHz VCO
+ *     900 MHz / POSTDIV0(3) = 300 MHz output
+ *
+ *   MUST be called after sam_dfll_configure() and before GCLK set2.
+ *
+ ****************************************************************************/
+
+static void sam_pll0_init(void)
+{
+  uint32_t regval;
+
+  /* 1. Enable additional voltage regulator (SUPC.VREGCTRL.AVREGEN=4).
+   *    Required for PLL0 operation on CA90.
+   */
+
+  regval  = getreg32(SAM_SUPC_VREGCTRL);
+  regval &= ~SUPC_VREGCTRL_AVREGEN_MASK;
+  regval |= SUPC_VREGCTRL_AVREGEN(4);
+  putreg32(regval, SAM_SUPC_VREGCTRL);
+
+  while ((getreg32(SAM_SUPC_STATUS) & SUPC_STATUS_ADDVREGRDY2) == 0)
+    {
+    }
+
+  /* 2. Disable PLL0 before configuration */
+
+  putreg32(0, SAM_OSCCTRL_PLL0CTRL);
+
+  /* 3. Set reference divider: 48 MHz / 12 = 4 MHz */
+
+  putreg32(12, SAM_OSCCTRL_PLL0REFDIV);
+
+  /* 4. Set feedback divider: 4 MHz * 225 = 900 MHz VCO */
+
+  putreg32(225, SAM_OSCCTRL_PLL0FBDIV);
+
+  /* 5. Clear fractional divider and wait for sync */
+
+  putreg32(0, SAM_OSCCTRL_FRACDIV0);
+  while ((getreg32(SAM_OSCCTRL_SYNCBUSY) &
+          OSCCTRL_SYNCBUSY_FRACDIV0) != 0)
+    {
+    }
+
+  /* 6. Set post-divider: 900 MHz / 3 = 300 MHz, enable output */
+
+  putreg32(OSCCTRL_PLL0POSTDIVA_OUTEN0 |
+           OSCCTRL_PLL0POSTDIVA_POSTDIV0(3),
+           SAM_OSCCTRL_PLL0POSTDIVA);
+
+  /* 7. Enable PLL0: REFSEL=2 (DFLL48M), BWSEL=1, ENABLE */
+
+  putreg32(OSCCTRL_PLL0CTRL_ENABLE |
+           OSCCTRL_PLL0CTRL_REFSEL_DFLL |
+           OSCCTRL_PLL0CTRL_BWSEL(1),
+           SAM_OSCCTRL_PLL0CTRL);
+
+  /* 8. Wait for PLL0 lock */
+
+  while ((getreg32(SAM_OSCCTRL_STATUS) &
+          OSCCTRL_STATUS_PLL0LOCK) == 0)
+    {
+    }
+}
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -529,45 +603,41 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
         }
     }
 
-  /* 5. Configure DFLL48M (open-loop for USB CRM) */
-
-  sam_dfll_configure(&config->dfll);
-
-  /* 6. FIX: Route GCLK5 to DPLL0's GCLK reference peripheral channel
-   *    (GCLK_PCHCTRL[1] = DPLL0 reference) BEFORE enabling DPLL0.
-   *
-   *    Without this call, DPLL0 CTRLB.REFCLK=0 (GCLK source selected)
-   *    but GCLK_PCHCTRL[1] is never connected, so DPLL0 has no reference
-   *    clock and the DPLLSTATUS.LOCK wait loop below hangs forever.
-   *
-   *    Harmony plib_clk.c equivalent:
-   *      GCLK_REGS->GCLK_PCHCTRL[1] = GCLK_PCHCTRL_GEN(5) |
-   *                                    GCLK_PCHCTRL_CHEN(1);
+  /* 5. DFLL48M is already running from reset (DFLLCTRLA RESETVALUE=0x82:
+   *    ENABLE=1, ONDEMAND=1). Harmony plib_clock.c never calls DFLL_Initialize()
+   *    — it relies on the reset default. Do NOT call sam_dfll_configure() here:
+   *    our DFLLSYNC register address is wrong on CA90 (offset 0x003C is DFLLMUL
+   *    on CA90, not DFLLSYNC which doesn't exist), and disabling then re-enabling
+   *    DFLL before PLL0 init risks a gap in the reference clock.
    */
 
-  if (config->dpll[0].enable &&
-      config->dpll[0].refclk == 0 /* GCLK reference */)
+  /* 6. Initialize PLL0 directly using Harmony-verified sequence.
+   *    DFLL48M -> PLL0 ref (REFSEL=2), REFDIV=12, FBDIV=225, POSTDIV0=3
+   *    -> 300 MHz.  BOARD_DPLL0_ENABLE=FALSE so sam_dpll_configure() is
+   *    a no-op; this function does the real PLL0 bring-up.
+   */
+
+  sam_pll0_init();
+
+  /* 7. Write MCLK.CLKDIV[1]=BOARD_MCLK_CPUDIV (=2) as Harmony does,
+   *    BEFORE switching GCLK0 source to PLL0.
+   */
+
+  putreg32(config->cpudiv, SAM_MCLK_CPUDIV);
+
+  /* Wait for clock domain divider to settle before switching GCLK0 to PLL0.
+   * Harmony always polls MCLK_INTFLAG.CKRDY here; omitting it risks a brief
+   * over-speed fetch when GCLK0 source switches.
+   */
+
+  while ((getreg32(SAM_MCLK_INTFLAG) & MCLK_INTFLAG_CKRDY) == 0)
     {
-      sam_gclk_chan_enable(GCLK_CHAN_DPLL0_REF,
-                           config->dpll[0].gclk,
-                           false);
     }
 
-  if (config->dpll[1].enable &&
-      config->dpll[1].refclk == 0)
-    {
-      sam_gclk_chan_enable(GCLK_CHAN_DPLL1_REF,
-                           config->dpll[1].gclk,
-                           false);
-    }
-
-  /* 7. Configure DPLL0 and DPLL1 (reference now connected above) */
-
-  sam_dpll_configure(0, &config->dpll[0]);
-  sam_dpll_configure(1, &config->dpll[1]);
-
-  /* 8. Configure remaining GCLKs (set 2: GCLK0 from DPLL0, GCLK1 from
-   *    DFLL, GCLK3 from OSCULP32K, etc.)
+  /* 8. Configure remaining GCLKs (set 2):
+   *    GCLK0: SRC=6(PLL0_1) -> 300 MHz CPU
+   *    GCLK1: SRC=5(DFLL)   -> 48 MHz USB
+   *    GCLK3: SRC=3(OSCULP32K) -> 32 kHz slow
    */
 
   for (i = 0; i < SAM_GCLK_NGEN; i++)
@@ -577,10 +647,6 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
           sam_gclk_configure(i, &config->gclk[i]);
         }
     }
-
-  /* 9. Set CPU clock divider (MCLK.CPUDIV = 1 → no division) */
-
-  putreg8(config->cpudiv, SAM_MCLK_CPUDIV);
 }
 
 void sam_clock_initialize(void)

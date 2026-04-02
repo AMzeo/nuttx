@@ -90,9 +90,17 @@ void __start(void)
                    "r"(CONFIG_IDLETHREAD_STACKSIZE - 64) :);
 #endif
 
-  /* Clear .bss */
+  /* Clear .bss.
+   *
+   * NOTE: _sbss/_ebss are linker symbols declared as "extern uint32_t".
+   * Their ADDRESSES are the BSS region boundaries, not their values.
+   * Use &_sbss / &_ebss (address-of) NOT (uint32_t *)_sbss (value-of).
+   * See NuttX arm_internal.h comment: "We can recover the linker value
+   * then by simply taking the address of _data. like: &_sdata".
+   * Reference: arch/arm/src/samd5e5/sam_start.c (identical chip family).
+   */
 
-  for (dest = (uint32_t *)_sbss; dest < (uint32_t *)_ebss; )
+  for (dest = &_sbss; dest < &_ebss; )
     {
       *dest++ = 0;
     }
@@ -101,8 +109,7 @@ void __start(void)
    * The CA90 always boots from flash so this is unconditional.
    */
 
-  for (src = (const uint32_t *)_eronly,
-       dest = (uint32_t *)_sdata; dest < (uint32_t *)_edata; )
+  for (src = &_eronly, dest = &_sdata; dest < &_edata; )
     {
       *dest++ = *src++;
     }
