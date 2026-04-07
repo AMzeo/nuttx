@@ -2,30 +2,23 @@
 /****************************************************************************
  * arch/arm/src/pic32czca90/sam_clockconfig.c
  *
- * PIC32CZ CA90 clock configuration
+ * PIC32CZ CA90 clock configuration.
  *
- * Clock tree for CA90 Curiosity Ultra (Harmony-verified, current implementation):
+ * Clock tree (PIC32CZ CA90 Curiosity Ultra, EV16W43A):
  *
- *   DFLL48M (48 MHz, open-loop, already running at reset — NOT configured in SW)
+ *   DFLL48M (48 MHz, open-loop, running from reset)
  *     |
- *   sam_pll0_init(): PLL0 REFSEL=2 (DFLL), REFDIV=12, FBDIV=225, POSTDIV0=3
- *     = 48 / 12 = 4 MHz ref  ×  225 = 900 MHz VCO  /  3 = 300 MHz
+ *   PLL0: REFDIV=12, FBDIV=225, POSTDIV0=3 → 300 MHz
  *     |
- *   GCLK0 (SRC=6=PLL0_1, DIV=1) → 300 MHz
- *     |
- *   MCLK.CLKDIV[1] = 2  (written before GCLK0 switch, NEVER restored — Harmony does
- *                         the same)  → CPU effective = 300 / 2 = 150 MHz
- *     BOARD_CPU_FREQUENCY = 150 MHz = DPLL0_FREQUENCY / 2  (SysTick uses this)
+ *     ├── GCLK0 (SRC=6, DIV=1)  →  300 MHz
+ *     │     └── MCLK.CLKDIV[1]=2  →  150 MHz  →  CPU
+ *     └── GCLK1 (SRC=6, DIV=2)  →  150 MHz  →  SERCOM1
+ *           └── BAUD=64730 → 115200 baud
  *
- *   GCLK1 (SRC=6=PLL0_1, DIV=2) → 150 MHz → SERCOM1 core clock
- *     └─ SERCOM1 BAUD=64730 → 115200 baud  (Harmony usart_echo_blocking verified)
+ *   OSCULP32K → GCLK3 (SRC=3, DIV=1) → 32.768 kHz (SERCOM slow, WDT)
  *
- *   GCLK3 (SRC=3=OSCULP32K, DIV=1) → 32.768 kHz → SERCOM slow clock, WDT
- *
- *   XOSC0 (12 MHz MEMS, Y300=DSC6011JI2B-012.0000) is present on the board but
- *   NOT used: BOARD_HAVE_XOSC0=0, GCLK5 disabled.  PLL0 references DFLL directly.
- *   All PLL0 bring-up is done by sam_pll0_init() which mirrors Harmony's
- *   PLL0_Initialize().
+ * Note: MCLK.CLKDIV[1]=2 is written before switching GCLK0 to PLL0 and
+ * kept permanently.  Effective CPU speed = 150 MHz.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -316,14 +309,13 @@ static void sam_xosc_configure(const struct sam_xosc_config_s *config)
  *
  * Description:
  *   Initialize PLL0 to 300 MHz using DFLL48M as reference.
- *   Sequence verified from Harmony plib_clock.c for CA80/CA90.
  *
- *   Clock math:
- *     DFLL48M (48 MHz) / REFDIV(12) = 4 MHz ref
- *     4 MHz * FBDIV(225) = 900 MHz VCO
- *     900 MHz / POSTDIV0(3) = 300 MHz output
+ *   DFLL48M (48 MHz) / REFDIV(12) = 4 MHz ref
+ *   4 MHz * FBDIV(225) = 900 MHz VCO
+ *   900 MHz / POSTDIV0(3) = 300 MHz output
  *
- *   MUST be called before GCLK set2 (after SUPC voltage regulator is ready).
+ *   Must be called after SUPC voltage regulator is ready and before
+ *   GCLK set2 (which switches GCLK0 to PLL0).
  *
  ****************************************************************************/
 
@@ -331,9 +323,7 @@ static void sam_pll0_init(void)
 {
   uint32_t regval;
 
-  /* 1. Enable additional voltage regulator (SUPC.VREGCTRL.AVREGEN=4).
-   *    Required for PLL0 operation on CA90.
-   */
+  /* 1. Enable additional voltage regulator (SUPC.VREGCTRL.AVREGEN=4) */
 
   regval  = getreg32(SAM_SUPC_VREGCTRL);
   regval &= ~SUPC_VREGCTRL_AVREGEN_MASK;
@@ -344,19 +334,19 @@ static void sam_pll0_init(void)
     {
     }
 
-  /* 2. Disable PLL0 before configuration */
+  /* 2. Clear PLL0 control register before configuration */
 
   putreg32(0, SAM_OSCCTRL_PLL0CTRL);
 
-  /* 3. Set reference divider: 48 MHz / 12 = 4 MHz */
+  /* 3. Reference divider: 48 MHz / 12 = 4 MHz */
 
   putreg32(12, SAM_OSCCTRL_PLL0REFDIV);
 
-  /* 4. Set feedback divider: 4 MHz * 225 = 900 MHz VCO */
+  /* 4. Feedback divider: 4 MHz * 225 = 900 MHz VCO */
 
   putreg32(225, SAM_OSCCTRL_PLL0FBDIV);
 
-  /* 5. Clear fractional divider and wait for sync */
+  /* 5. Clear fractional divider */
 
   putreg32(0, SAM_OSCCTRL_FRACDIV0);
   while ((getreg32(SAM_OSCCTRL_SYNCBUSY) &
@@ -364,13 +354,13 @@ static void sam_pll0_init(void)
     {
     }
 
-  /* 6. Set post-divider: 900 MHz / 3 = 300 MHz, enable output */
+  /* 6. Post-divider: 900 MHz / 3 = 300 MHz, enable output */
 
   putreg32(OSCCTRL_PLL0POSTDIVA_OUTEN0 |
            OSCCTRL_PLL0POSTDIVA_POSTDIV0(3),
            SAM_OSCCTRL_PLL0POSTDIVA);
 
-  /* 7. Enable PLL0: REFSEL=2 (DFLL48M), BWSEL=1, ENABLE */
+  /* 7. Enable PLL0: REFSEL=2 (DFLL48M), BWSEL=1 */
 
   putreg32(OSCCTRL_PLL0CTRL_ENABLE |
            OSCCTRL_PLL0CTRL_REFSEL_DFLL |
@@ -393,9 +383,7 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
 {
   int i;
 
-  /* PIC32CZ CA90: No NVMCTRL – FCR manages flash wait states automatically.
-   * Do NOT write to SAM_NVMCTRL_CTRLA (that peripheral does not exist here).
-   */
+  /* CA90 FCR manages flash wait states automatically; no NVMCTRL write. */
 
   /* 1. Configure XOSC32K if needed */
 
@@ -403,13 +391,13 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
   sam_xosc32k_configure(&config->xosc32k);
 #endif
 
-  /* 2. Configure XOSC0 if enabled (12 MHz MEMS oscillator, currently unused) */
+  /* 2. Configure XOSC0 if enabled */
 
 #if BOARD_HAVE_XOSC0 != 0
   sam_xosc_configure(&config->xosc0);
 #endif
 
-  /* 4. Configure GCLK set 1 (generators that must be up before PLL0 starts). */
+  /* 3. Configure GCLK set 1 (must be up before PLL0) */
 
   for (i = 0; i < SAM_GCLK_NGEN; i++)
     {
@@ -419,38 +407,30 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
         }
     }
 
-  /* 5. DFLL48M is already running from reset (DFLLCTRLA RESETVALUE=0x82:
-   *    ENABLE=1, ONDEMAND=1). Harmony plib_clock.c never calls DFLL_Initialize()
-   *    — it relies on the reset default. Do NOT call sam_dfll_configure() here:
-   *    CA90 has no DFLLSYNC register; disabling then re-enabling DFLL before
-   *    PLL0 init risks a gap in the reference clock.
+  /* 4. DFLL48M is already running from reset (DFLLCTRLA reset value = 0x82:
+   *    ENABLE=1, ONDEMAND=1).  Do not call sam_dfll_configure(): CA90 has no
+   *    DFLLSYNC register, and disabling DFLL before PLL0 init would gap the
+   *    reference clock.
    */
 
-  /* 6. Initialize PLL0: DFLL48M → REFSEL=2, REFDIV=12, FBDIV=225, POSTDIV0=3
-   *    → 300 MHz.  Harmony-verified sequence (plib_clock.c PLL0_Initialize()).
-   */
+  /* 5. Initialize PLL0: DFLL48M → 300 MHz */
 
   sam_pll0_init();
 
-  /* 7. Write MCLK.CLKDIV[1]=BOARD_MCLK_CPUDIV (=2) as Harmony does,
-   *    BEFORE switching GCLK0 source to PLL0.
+  /* 6. Set MCLK.CLKDIV[1]=2 before switching GCLK0 to PLL0 to prevent
+   *    momentary overspeed during the source change.
    */
 
   putreg32(config->cpudiv, SAM_MCLK_CPUDIV);
-
-  /* Wait for clock domain divider to settle before switching GCLK0 to PLL0.
-   * Harmony always polls MCLK_INTFLAG.CKRDY here; omitting it risks a brief
-   * over-speed fetch when GCLK0 source switches.
-   */
 
   while ((getreg32(SAM_MCLK_INTFLAG) & MCLK_INTFLAG_CKRDY) == 0)
     {
     }
 
-  /* 8. Configure remaining GCLKs (set 2):
-   *    GCLK0: SRC=6(PLL0_1), DIV=1 -> 300 MHz CPU
-   *    GCLK1: SRC=6(PLL0_1), DIV=2 -> 150 MHz SERCOM1 core clock
-   *    GCLK3: SRC=3(OSCULP32K), DIV=1 -> 32.768 kHz SERCOM slow / WDT
+  /* 7. Configure GCLK set 2:
+   *    GCLK0: SRC=6 (PLL0_1), DIV=1  → 300 MHz CPU input
+   *    GCLK1: SRC=6 (PLL0_1), DIV=2  → 150 MHz SERCOM1
+   *    GCLK3: SRC=3 (OSCULP32K), DIV=1 → 32.768 kHz
    */
 
   for (i = 0; i < SAM_GCLK_NGEN; i++)

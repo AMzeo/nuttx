@@ -2,19 +2,29 @@
 /****************************************************************************
  * boards/arm/pic32czca90/pic32czca90-curiosity/scripts/linker.ld
  *
- * PIC32CZ CA90 Curiosity Ultra linker script
+ * PIC32CZ CA80/CA90 Curiosity Ultra — standalone NuttX linker script
  *
- * Flash: 8 MB at 0x0C000000
- * DTCM:  128 KB at 0x20000000
- * SRAM:  896 KB at 0x20020000 (FlexRAM + System SRAM)
- * Total SRAM: ~1 MB
+ * Boot Flash Memory (BFM): 128 KB at 0x08000000 — vector table lives here
+ * Program Flash Memory (PFM):  8 MB at 0x0C000000 — code and rodata
+ * SRAM:                      832 KB at 0x20020000 — heap, stack, data
+ * nocache:                    64 KB at 0x200F0000 — DMA buffers (uncached)
+ *
+ * Boot sequence: BootROM (0x04000000) reads SP=[BFM+0], PC=[BFM+4] (→ __start
+ * in PFM), sets VTOR=0x08000000, then jumps. Matches Harmony VECTOR_REGION=boot_rom.
+ *
+ * CA80 vs CA90: identical memory map; CA90 adds HSM (Hardware Security Module).
+ *
+ * NOTE: This file is the standalone NuttX linker script (not used by the PX4
+ * build). The PX4 build uses nuttx-config/scripts/script.ld instead. Both
+ * files must be kept in sync.
  ****************************************************************************/
 
 MEMORY
 {
-    flash  (rx)  : ORIGIN = 0x0C000000, LENGTH = 8M
-    dtcm   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
-    sram   (rwx) : ORIGIN = 0x20020000, LENGTH = 896K
+    boot_rom (rx)  : ORIGIN = 0x08000000, LENGTH = 128K  /* BFM — vector table */
+    flash    (rx)  : ORIGIN = 0x0C000000, LENGTH = 8M    /* PFM — code          */
+    sram     (rwx) : ORIGIN = 0x20020000, LENGTH = 832K
+    nocache  (rwx) : ORIGIN = 0x200F0000, LENGTH = 64K
 }
 
 OUTPUT_ARCH(arm)
@@ -23,10 +33,17 @@ ENTRY(__start)
 
 SECTIONS
 {
+    /* Vector table: placed at BFM start (0x08000000).
+     * BootROM reads [BFM+0]=SP and [BFM+4]=PC (= __start in PFM) before jumping.
+     */
+    .vectors :
+    {
+        KEEP(*(.vectors))
+    } > boot_rom
+
     .text :
     {
         _stext = ABSOLUTE(.);
-        *(.vectors)
         *(.text .text.*)
         *(.fixup)
         *(.gnu.warning)
@@ -72,6 +89,15 @@ SECTIONS
         _edata = ABSOLUTE(.);
     } > sram AT > flash
 
+    .ramfunc ALIGN(4):
+    {
+        _sramfuncs = ABSOLUTE(.);
+        *(.ramfunc .ramfunc.*)
+        _eramfuncs = ABSOLUTE(.);
+    } > sram AT > flash
+
+    _framfuncs = LOADADDR(.ramfunc);
+
     .bss :
     {
         _sbss = ABSOLUTE(.);
@@ -82,8 +108,16 @@ SECTIONS
         _ebss = ABSOLUTE(.);
     } > sram
 
-    /* Stabs debugging sections */
+    .nocache (NOLOAD) :
+    {
+        . = ALIGN(32);
+        _s_nocache = ABSOLUTE(.);
+        *(.nocache .nocache.*)
+        . = ALIGN(32);
+        _e_nocache = ABSOLUTE(.);
+    } > nocache
 
+    /* Stabs debugging sections */
     .stab 0 : { *(.stab) }
     .stabstr 0 : { *(.stabstr) }
     .stab.excl 0 : { *(.stab.excl) }

@@ -41,12 +41,12 @@
 #define PIC32CZCA90_DTCM_SIZE       (128*1024)     /* 128 KB DTCM */
 #define PIC32CZCA90_ITCM_SIZE       (128*1024)     /* 128 KB ITCM */
 
-/* Peripheral counts */
+/* Peripheral counts — from Harmony device_vectors.h (PIC32CZ8110CA80208 DFP) */
 
-#define PIC32CZCA90_NSERCOM         8              /* SERCOM0-7 */
-#define PIC32CZCA90_NTC             8              /* TC0-TC7 */
-#define PIC32CZCA90_NTCC            5              /* TCC0-TCC4 */
-#define PIC32CZCA90_NCAN            2              /* CAN0-CAN1 (MCAN) */
+#define PIC32CZCA90_NSERCOM         10             /* SERCOM0-9 */
+#define PIC32CZCA90_NTC             0              /* No TC (basic timer) — CA90 uses TCC for all timers */
+#define PIC32CZCA90_NTCC            10             /* TCC0-TCC9 */
+#define PIC32CZCA90_NCAN            6              /* CAN0-5 (MCAN) */
 #define PIC32CZCA90_NDMACHAN        32             /* 32 DMA channels */
 #define PIC32CZCA90_NADC0CHAN       16             /* ADC0 channels */
 #define PIC32CZCA90_NADC1CHAN       16             /* ADC1 channels */

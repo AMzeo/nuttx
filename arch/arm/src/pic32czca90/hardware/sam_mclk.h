@@ -6,15 +6,9 @@
  * PIC32CZ CA90 Main Clock (MCLK)
  * Base: 0x44052000
  *
- * Register layout verified from PIC32CZ8110CA80208_DFP/component/mclk.h
+ * Register layout from PIC32CZ8110CA80208_DFP/component/mclk.h
  *
- * CRITICAL: CA90 uses CLKMSK[0..8] registers for peripheral APB clock
- * enables – NOT APBxMASK registers as on SAMD5x. The previous version
- * had APBxMASK registers (offsets 0x10-0x28) which do NOT exist on CA90,
- * causing SERCOM4 to never receive an APB clock.
- *
- *   Peripheral enable: CLKMSK[id/32] |= (1 << (id%32))
- *   SERCOM4 MCLK_ID_APB = 35 → CLKMSK[1] bit 3
+ * Peripheral APB clock enable: CLKMSK[id/32] |= (1 << (id%32))
  *
  ****************************************************************************/
 
@@ -92,12 +86,7 @@
 #define SAM_MCLK_CLKMSK_ADDR(id)    SAM_MCLK_CLKMSK((uint32_t)(id) / 32u)
 #define SAM_MCLK_CLKMSK_BIT(id)     (1u << ((uint32_t)(id) % 32u))
 
-/* CPUDIV alias – CA90 DFP names this register CLKDIV[1] (offset 0x0010).
- * Harmony writes MCLK.CLKDIV[1]=2 in GCLK0_Initialize() before switching
- * GCLK0 to PLL0, and NEVER restores it to 1.  This is the FINAL value.
- * Effective CPU speed = fmain / CPUDIV = 300 MHz / 2 = 150 MHz.
- * BOARD_CPU_FREQUENCY = 150 MHz = DPLL0_FREQUENCY / 2 (correct for SysTick).
- */
+/* CPUDIV alias — CA90 DFP names this register CLKDIV[1] (offset 0x0010). */
 
 #define SAM_MCLK_CPUDIV             SAM_MCLK_CLKDIV(1)
 

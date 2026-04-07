@@ -11,10 +11,16 @@ config PIC32CZCA90_SERCOM
 	bool
 	default n
 
+config PIC32CZCA90_TCC
+	bool
+	default n
+
 config PIC32CZCA90_DMAC
 	bool "DMA Controller"
 	default n
 	select ARCH_DMA
+
+# SERCOM0-9 (CA90 has 10 SERCOMs)
 
 config PIC32CZCA90_SERCOM0
 	bool "Serial Communication Interface 0"
@@ -56,12 +62,40 @@ config PIC32CZCA90_SERCOM7
 	default n
 	select PIC32CZCA90_SERCOM
 
+config PIC32CZCA90_SERCOM8
+	bool "Serial Communication Interface 8"
+	default n
+	select PIC32CZCA90_SERCOM
+
+config PIC32CZCA90_SERCOM9
+	bool "Serial Communication Interface 9"
+	default n
+	select PIC32CZCA90_SERCOM
+
+# CAN-FD — CA90 has 6 MCAN instances (CAN0-5)
+
 config PIC32CZCA90_CAN0
 	bool "CAN-FD 0"
 	default n
 
 config PIC32CZCA90_CAN1
 	bool "CAN-FD 1"
+	default n
+
+config PIC32CZCA90_CAN2
+	bool "CAN-FD 2"
+	default n
+
+config PIC32CZCA90_CAN3
+	bool "CAN-FD 3"
+	default n
+
+config PIC32CZCA90_CAN4
+	bool "CAN-FD 4"
+	default n
+
+config PIC32CZCA90_CAN5
+	bool "CAN-FD 5"
 	default n
 
 config PIC32CZCA90_GMAC
@@ -86,60 +120,62 @@ config PIC32CZCA90_DAC
 	bool "Digital-to-Analog Converter"
 	default n
 
-config PIC32CZCA90_TC0
-	bool "Timer/Counter 0"
-	default n
-
-config PIC32CZCA90_TC1
-	bool "Timer/Counter 1"
-	default n
-
-config PIC32CZCA90_TC2
-	bool "Timer/Counter 2"
-	default n
-
-config PIC32CZCA90_TC3
-	bool "Timer/Counter 3"
-	default n
-
-config PIC32CZCA90_TC4
-	bool "Timer/Counter 4"
-	default n
-
-config PIC32CZCA90_TC5
-	bool "Timer/Counter 5"
-	default n
-
-config PIC32CZCA90_TC6
-	bool "Timer/Counter 6"
-	default n
-
-config PIC32CZCA90_TC7
-	bool "Timer/Counter 7"
-	default n
+# TCC0-9 — CA90 has 10 TCC instances; no plain TC (NTC=0)
 
 config PIC32CZCA90_TCC0
 	bool "Timer/Counter for Control 0"
 	default n
+	select PIC32CZCA90_TCC
 
 config PIC32CZCA90_TCC1
 	bool "Timer/Counter for Control 1"
 	default n
+	select PIC32CZCA90_TCC
 
 config PIC32CZCA90_TCC2
 	bool "Timer/Counter for Control 2"
 	default n
+	select PIC32CZCA90_TCC
 
 config PIC32CZCA90_TCC3
 	bool "Timer/Counter for Control 3"
 	default n
+	select PIC32CZCA90_TCC
 
 config PIC32CZCA90_TCC4
 	bool "Timer/Counter for Control 4"
 	default n
+	select PIC32CZCA90_TCC
 
-config PIC32CZCA90_QSPI
-	bool "QSPI"
+config PIC32CZCA90_TCC5
+	bool "Timer/Counter for Control 5"
+	default n
+	select PIC32CZCA90_TCC
+
+config PIC32CZCA90_TCC6
+	bool "Timer/Counter for Control 6"
+	default n
+	select PIC32CZCA90_TCC
+
+config PIC32CZCA90_TCC7
+	bool "Timer/Counter for Control 7"
+	default n
+	select PIC32CZCA90_TCC
+
+config PIC32CZCA90_TCC8
+	bool "Timer/Counter for Control 8"
+	default n
+	select PIC32CZCA90_TCC
+
+config PIC32CZCA90_TCC9
+	bool "Timer/Counter for Control 9"
+	default n
+	select PIC32CZCA90_TCC
+
+# CA90 has SQI (Serial Quad Interface), not QSPI
+
+config PIC32CZCA90_SQI
+	bool "SQI (Serial Quad Interface)"
 	default n
 
 config PIC32CZCA90_RTC
@@ -332,6 +368,44 @@ config PIC32CZCA90_SERCOM7_ISSPI
 config PIC32CZCA90_SERCOM7_ISUSART
 	bool "USART"
 	select USART7_SERIALDRIVER
+
+endchoice
+
+choice
+	prompt "SERCOM8 mode"
+	default PIC32CZCA90_SERCOM8_ISUSART
+	depends on PIC32CZCA90_SERCOM8
+
+config PIC32CZCA90_SERCOM8_ISI2C
+	bool "I2C Master"
+	select I2C
+
+config PIC32CZCA90_SERCOM8_ISSPI
+	bool "SPI"
+	select SPI
+
+config PIC32CZCA90_SERCOM8_ISUSART
+	bool "USART"
+	select USART8_SERIALDRIVER
+
+endchoice
+
+choice
+	prompt "SERCOM9 mode"
+	default PIC32CZCA90_SERCOM9_ISUSART
+	depends on PIC32CZCA90_SERCOM9
+
+config PIC32CZCA90_SERCOM9_ISI2C
+	bool "I2C Master"
+	select I2C
+
+config PIC32CZCA90_SERCOM9_ISSPI
+	bool "SPI"
+	select SPI
+
+config PIC32CZCA90_SERCOM9_ISUSART
+	bool "USART"
+	select USART9_SERIALDRIVER
 
 endchoice
 endmenu # SERCOM Configuration

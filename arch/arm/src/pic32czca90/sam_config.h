@@ -10,11 +10,9 @@
 
 #include <nuttx/config.h>
 
-/* Number of SERCOM peripherals */
-
-#define PIC32CZCA90_NSERCOM  8
-
-/* How many SERCOMs are configured as USART? */
+/* How many SERCOMs are configured as USART?
+ * PIC32CZCA90_NSERCOM (=10) is defined in arch/arm/include/pic32czca90/chip.h
+ */
 
 #define PIC32CZCA90_HAVE_USART0 1
 #define PIC32CZCA90_HAVE_USART1 1

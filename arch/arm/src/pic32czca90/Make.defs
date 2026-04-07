@@ -24,8 +24,8 @@ ifeq ($(CONFIG_PIC32CZCA90_SERCOM),y)
 CHIP_CSRCS += sam_sercom.c
 endif
 
-ifeq ($(CONFIG_PIC32CZCA90_TC),y)
-CHIP_CSRCS += sam_tc.c
+ifeq ($(CONFIG_PIC32CZCA90_TCC),y)
+CHIP_CSRCS += sam_tcc.c
 
 ifeq ($(CONFIG_PIC32CZCA90_ONESHOT),y)
 CHIP_CSRCS += sam_oneshot.c sam_oneshot_lowerhalf.c
@@ -38,7 +38,7 @@ endif
 ifeq ($(CONFIG_SCHED_TICKLESS),y)
 CHIP_CSRCS += sam_tickless.c
 endif
-endif # CONFIG_PIC32CZCA90_TC
+endif # CONFIG_PIC32CZCA90_TCC
 
 ifeq ($(CONFIG_BUILD_PROTECTED),y)
 CHIP_CSRCS += sam_userspace.c sam_mpuinit.c
