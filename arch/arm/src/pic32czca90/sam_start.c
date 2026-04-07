@@ -83,6 +83,28 @@ void __start(void)
   const uint32_t *src;
   uint32_t *dest;
 
+  /* Explicitly set VTOR to our flash vector table.
+   *
+   * CA90 boot sequence: BootROM at 0x04000000 is aliased to 0x00000000 at
+   * reset (VTOR=0x00000000).  BootROM reads SP/PC from [0x0C000000]/[4],
+   * sets VTOR=0x0C000000, then jumps here.  We re-affirm VTOR here so that:
+   *   (a) any early exception (HardFault during clock init) is handled by
+   *       our own flash handlers, not the BootROM's handlers at 0x00000000;
+   *   (b) this code is correct even if a future BootROM version does not
+   *       update VTOR before jumping.
+   * Mirrors Harmony startup_xc32.c: SCB->VTOR = (uint32_t)&__svectors.
+   *
+   * Note: ITCM (128KB, 0x00000000) and DTCM (128KB, 0x20000000) are present
+   * on this Cortex-M7.  ITCM is disabled at reset and kept disabled.  DTCM
+   * may have been enabled and partially initialized by Boot ROM (DS §7.6.2:
+   * "Boot ROM initializes a portion of DTCM to facilitate function") — we
+   * never access the DTCM region since all data is in SRAM (0x20020000).
+   * With ITCM disabled, VTOR must not point to 0x00000000 — hence this write.
+   */
+
+  extern const uint32_t _vectors[];
+  putreg32((uint32_t)_vectors, NVIC_VECTAB);
+
 #ifdef CONFIG_ARMV7M_STACKCHECK
   /* Set the stack limit before we attempt to call any functions */
 

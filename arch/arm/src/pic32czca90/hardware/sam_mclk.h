@@ -92,11 +92,11 @@
 #define SAM_MCLK_CLKMSK_ADDR(id)    SAM_MCLK_CLKMSK((uint32_t)(id) / 32u)
 #define SAM_MCLK_CLKMSK_BIT(id)     (1u << ((uint32_t)(id) % 32u))
 
-/* CPUDIV alias – CA90 has no dedicated CPUDIV register.
- * Harmony writes CLKDIV[1]=2 before switching GCLK0 to PLL0.
- * Map SAM_MCLK_CPUDIV to CLKDIV[1] so that
- *   putreg32(BOARD_MCLK_CPUDIV, SAM_MCLK_CPUDIV)
- * writes the correct value (2).
+/* CPUDIV alias – CA90 DFP names this register CLKDIV[1] (offset 0x0010).
+ * Harmony writes MCLK.CLKDIV[1]=2 in GCLK0_Initialize() before switching
+ * GCLK0 to PLL0, and NEVER restores it to 1.  This is the FINAL value.
+ * Effective CPU speed = fmain / CPUDIV = 300 MHz / 2 = 150 MHz.
+ * BOARD_CPU_FREQUENCY = 150 MHz = DPLL0_FREQUENCY / 2 (correct for SysTick).
  */
 
 #define SAM_MCLK_CPUDIV             SAM_MCLK_CLKDIV(1)

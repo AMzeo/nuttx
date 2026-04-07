@@ -3,10 +3,10 @@
  * boards/arm/pic32czca90/pic32czca90-curiosity/src/pic32czca90_userleds.c
  *
  * User LED control
- ****************************************************************************/
-
-/****************************************************************************
- * Included Files
+ *
+ * Board: PIC32CZ CA90 Curiosity Ultra (EV16W43A)
+ * LED0 (BOARD_LED0): PB21, active LOW — DS70005522C Table 2-11
+ * LED1 (BOARD_LED1): PB22, active LOW — DS70005522C Table 2-11
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -21,36 +21,45 @@
 #include "hardware/sam_pinmap.h"
 
 /****************************************************************************
- * Public Functions
+ * Private Data
  ****************************************************************************/
 
+static const uint32_t g_ledpins[BOARD_NLEDS] =
+{
+  PORT_LED0,  /* BOARD_LED0 = 0, PB21 */
+  PORT_LED1,  /* BOARD_LED1 = 1, PB22 */
+};
+
 /****************************************************************************
- * Name: board_userled_initialize
+ * Public Functions
  ****************************************************************************/
 
 uint32_t board_userled_initialize(void)
 {
-  sam_portconfig(PORT_LED0);
+  int i;
+
+  for (i = 0; i < BOARD_NLEDS; i++)
+    {
+      sam_portconfig(g_ledpins[i]);
+    }
+
   return BOARD_NLEDS;
 }
 
-/****************************************************************************
- * Name: board_userled
- ****************************************************************************/
-
 void board_userled(int led, bool ledon)
 {
-  if (led == BOARD_LED0)
+  if ((unsigned)led < BOARD_NLEDS)
     {
-      sam_portwrite(PORT_LED0, ledon);
+      sam_portwrite(g_ledpins[led], !ledon);  /* active LOW: invert */
     }
 }
 
-/****************************************************************************
- * Name: board_userled_all
- ****************************************************************************/
-
 void board_userled_all(uint32_t ledset)
 {
-  board_userled(BOARD_LED0, (ledset & BOARD_LED0_BIT) != 0);
+  int i;
+
+  for (i = 0; i < BOARD_NLEDS; i++)
+    {
+      board_userled(i, (ledset & (1 << i)) != 0);
+    }
 }

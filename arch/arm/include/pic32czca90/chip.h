@@ -39,7 +39,7 @@
 #define PIC32CZCA90_FLASH_SIZE      (8*1024*1024)  /* 8 MB */
 #define PIC32CZCA90_SRAM_SIZE       (1024*1024)    /* 1 MB total */
 #define PIC32CZCA90_DTCM_SIZE       (128*1024)     /* 128 KB DTCM */
-#define PIC32CZCA90_ITCM_SIZE       (64*1024)      /* 64 KB ITCM */
+#define PIC32CZCA90_ITCM_SIZE       (128*1024)     /* 128 KB ITCM */
 
 /* Peripheral counts */
 

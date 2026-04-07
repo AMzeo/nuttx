@@ -33,7 +33,7 @@
 
 void sam_board_initialize(void)
 {
-  /* Configure LED0 (PC21) as output */
+  /* Configure LED0 (PB21, active LOW) as output, initially HIGH (LED off) */
 
   sam_portconfig(PORT_LED0);
 

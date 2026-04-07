@@ -9,8 +9,9 @@
  * Register offsets verified from PIC32CZ8110CA80208_DFP/component/oscctrl.h
  *
  * Clock strategy (Harmony-verified for CA90):
- *   DFLL48M (free-running, 48 MHz) → PLL0 reference (REFSEL=2)
- *   PLL0: REFDIV=12 → 4 MHz ref, FBDIV=225 → 900 MHz VCO, POSTDIV0=3 → 300 MHz
+ *   DFLL48M (48 MHz, free-running from reset) → PLL0 reference (REFSEL=2)
+ *   PLL0: REFDIV=12, FBDIV=225 → 900 MHz VCO, POSTDIV0=3 → 300 MHz
+ *   DFLLSYNC does NOT exist on CA90 (SAMD5x-only). sam_dfll_configure() is never called.
  *   NOT DPLL0/DPLL1 (those are SAMD5x registers that do NOT exist on CA90)
  *
  ****************************************************************************/
@@ -34,8 +35,7 @@
 #define SAM_OSCCTRL_DFLLCTRLA_OFFSET        0x002C  /* DFLL48M Control A     */
 #define SAM_OSCCTRL_DFLLCTRLB_OFFSET        0x0030  /* DFLL48M Control B     */
 #define SAM_OSCCTRL_DFLLVAL_OFFSET          0x0034  /* DFLL48M Value         */
-#define SAM_OSCCTRL_DFLLMUL_OFFSET          0x0038  /* DFLL48M Multiplier    */
-#define SAM_OSCCTRL_DFLLSYNC_OFFSET         0x003C  /* DFLL48M Sync          */
+#define SAM_OSCCTRL_DFLLMUL_OFFSET          0x003C  /* DFLL48M Multiplier (DFP: component/oscctrl.h) */
 #define SAM_OSCCTRL_PLL0CTRL_OFFSET         0x0040  /* PLL0 Control          */
 #define SAM_OSCCTRL_PLL0FBDIV_OFFSET        0x0044  /* PLL0 Feedback Divider */
 #define SAM_OSCCTRL_PLL0REFDIV_OFFSET       0x0048  /* PLL0 Reference Divider*/
@@ -59,7 +59,6 @@
 #define SAM_OSCCTRL_DFLLCTRLB    (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLCTRLB_OFFSET)
 #define SAM_OSCCTRL_DFLLVAL      (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLVAL_OFFSET)
 #define SAM_OSCCTRL_DFLLMUL      (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLMUL_OFFSET)
-#define SAM_OSCCTRL_DFLLSYNC     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_DFLLSYNC_OFFSET)
 #define SAM_OSCCTRL_PLL0CTRL     (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL0CTRL_OFFSET)
 #define SAM_OSCCTRL_PLL0FBDIV    (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL0FBDIV_OFFSET)
 #define SAM_OSCCTRL_PLL0REFDIV   (SAM_OSCCTRL_BASE + SAM_OSCCTRL_PLL0REFDIV_OFFSET)
@@ -78,8 +77,7 @@
  * =========================================================================
  */
 
-#define OSCCTRL_STATUS_XOSCRDY0          (1u << 0)  /* XOSC ready            */
-#define OSCCTRL_STATUS_XOSCRDY1          (1u << 0)  /* alias (single XOSC)   */
+#define OSCCTRL_STATUS_XOSCRDY0          (1u << 0)  /* XOSC0 ready (CA90 has one XOSC) */
 #define OSCCTRL_STATUS_XOSCFAIL0         (1u << 2)  /* XOSC failure          */
 #define OSCCTRL_STATUS_DFLLRDY           (1u << 8)  /* DFLL48M ready         */
 #define OSCCTRL_STATUS_DFLLOOB           (1u << 9)
@@ -144,11 +142,6 @@
 #define OSCCTRL_DFLLMUL_FSTEP_MASK       (0xffu << OSCCTRL_DFLLMUL_FSTEP_SHIFT)
 #define OSCCTRL_DFLLMUL_CSTEP_SHIFT      26
 #define OSCCTRL_DFLLMUL_CSTEP_MASK       (0x3fu << OSCCTRL_DFLLMUL_CSTEP_SHIFT)
-
-#define OSCCTRL_DFLLSYNC_ENABLE          (1u << 1)
-#define OSCCTRL_DFLLSYNC_DFLLCTRLB       (1u << 2)
-#define OSCCTRL_DFLLSYNC_DFLLVAL         (1u << 3)
-#define OSCCTRL_DFLLSYNC_DFLLMUL         (1u << 4)
 
 /* =========================================================================
  * PLL0CTRL Register Bits (offset 0x0040, 32-bit)

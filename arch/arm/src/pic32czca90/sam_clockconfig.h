@@ -30,7 +30,7 @@ struct sam_xosc32_config_s
   uint8_t rtcsel;
 };
 
-/* XOSC0/1 configuration */
+/* XOSC0 configuration (CA90 has one external oscillator: XOSCCTRLA) */
 
 struct sam_xosc_config_s
 {
@@ -82,7 +82,7 @@ struct sam_dpll_config_s
   uint8_t runstdby   : 1;
   uint8_t ondemand   : 1;
   uint8_t reflock    : 1;
-  uint8_t refclk;            /* 0=GCLK, 1=XOSC32, 2=XOSC0, 3=XOSC1 */
+  uint8_t refclk;            /* 0=GCLK, 1=XOSC32K, 2=XOSC0 */
   uint8_t ltime;
   uint8_t filter;
   uint8_t dcofilter;
@@ -106,9 +106,6 @@ struct sam_clockconfig_s
 #endif
 #if BOARD_HAVE_XOSC0 != 0
   struct sam_xosc_config_s xosc0;
-#endif
-#if BOARD_HAVE_XOSC1 != 0
-  struct sam_xosc_config_s xosc1;
 #endif
   struct sam_dfll_config_s dfll;
   struct sam_dpll_config_s dpll[2];

@@ -3,19 +3,15 @@
 /****************************************************************************
  * arch/arm/src/pic32czca90/hardware/pic32czca90_pinmap.h
  *
- * PIC32CZ CA90 pin multiplexing definitions
- * Curiosity Ultra board (EV16W43A) – DS70005522C
+ * PIC32CZ CA90 Curiosity Ultra (EV16W43A) pin assignments — DS70005522C
  *
- * CORRECTED: Previous version had SERCOM4 on PB08/PB09 (SAMD5x default).
+ * Console UART: SERCOM1, PC04 (PAD0 TX) / PC07 (PAD3 RX), function D
+ *   → PKoB4 VCP (J700).  Confirmed from Harmony usart_echo_blocking.
+ *   PC21/PC22 are SERCOM4 EXT2 expansion pins — NOT the console.
  *
- * Actual Curiosity Ultra console UART pins (DS70005522C schematic):
- *   PKoB4_VCP → APP_VCP_TX/RX → PC21 (TX) / PC22 (RX)
- *   Confirmed from schematic sheet SHT_4_Target_MCU_R4, signal names:
- *   P17_PC21_EXT2_SERCOM4_PAD0 (TX)
- *   P18_PC22_EXT2_SERCOM4_PAD1 (RX)
- *   PMUX function = E (value 4) for SERCOM4 on PC21/PC22
- *
- * Oscillator: Y300 = DSC6011JI2B-012.0000 = 12 MHz (NOT 24 MHz)
+ * LEDs:  LED0=PB21 (active LOW), LED1=PB22 (active LOW) — DS70005522C §2-11
+ * Buttons: SW0=PB24, SW1=PC23 (active LOW, pullup) — DS70005522C §2-11
+ * Oscillator: Y300 = DSC6011JI2B-012.0000 = 12 MHz MEMS
  *
  ****************************************************************************/
 
@@ -47,11 +43,12 @@
 #define PORT_PIN(n)         ((uint32_t)(n) << PORT_PIN_SHIFT)
 
 /* Configuration flags */
-#define PORT_FLAG_PMUXEN    (1 << 0)
-#define PORT_FLAG_INEN      (1 << 1)
-#define PORT_FLAG_PULLEN    (1 << 2)
-#define PORT_FLAG_OUTPUT    (1 << 3)
-#define PORT_FLAG_DRVSTR    (1 << 4)
+#define PORT_FLAG_PMUXEN       (1 << 0)
+#define PORT_FLAG_INEN         (1 << 1)
+#define PORT_FLAG_PULLEN       (1 << 2)
+#define PORT_FLAG_OUTPUT       (1 << 3)
+#define PORT_FLAG_DRVSTR       (1 << 4)
+#define PORT_FLAG_OUTVAL_HIGH  (1 << 5)  /* preload OUT=1 before enabling output */
 
 /* =========================================================================
  * SERCOM1 – Console UART (PKoB4 VCP on J700)
@@ -118,13 +115,13 @@
 
 /* =========================================================================
  * On-board LEDs – DS70005522C Table 2-11
- * LED0: PB21 (active LOW, yellow)
- * LED1: PB22 (active LOW, yellow)
+ * LED0: PB21 (active LOW, yellow) — initial state HIGH = LED off (Harmony: OUTSET then DIRSET)
+ * LED1: PB22 (active LOW, yellow) — initial state HIGH = LED off
  * =========================================================================
  */
 
-#define PORT_LED0           (PORT_PORTB | PORT_PIN(21) | PORT_FLAG_OUTPUT)
-#define PORT_LED1           (PORT_PORTB | PORT_PIN(22) | PORT_FLAG_OUTPUT)
+#define PORT_LED0           (PORT_PORTB | PORT_PIN(21) | PORT_FLAG_OUTPUT | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_LED1           (PORT_PORTB | PORT_PIN(22) | PORT_FLAG_OUTPUT | PORT_FLAG_OUTVAL_HIGH)
 
 /* =========================================================================
  * On-board Buttons – DS70005522C Table 2-11
