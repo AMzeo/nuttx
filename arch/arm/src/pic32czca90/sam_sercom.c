@@ -111,7 +111,7 @@ void sercom_coreclk_configure(int sercom, int gclkgen, bool wrlock)
 
 void sercom_slowclk_configure(int sercom, int gclkgen)
 {
-  /* All SERCOMs share GCLK channel 3 for the slow clock */
+  /* All SERCOMs share GCLK channel 18 for the slow clock (DFP: SERCOM*_GCLK_ID_SLOW=18) */
 
-  sam_gclk_chan_enable(GCLK_CHAN_SLOW, (uint8_t)gclkgen, false);
+  sam_gclk_chan_enable(GCLK_CHAN_SERCOM_SLOW, (uint8_t)gclkgen, false);
 }

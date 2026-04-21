@@ -8,6 +8,7 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
+#include <inttypes.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
@@ -47,9 +48,72 @@
 
 volatile uint32_t *g_current_regs[1];
 
+/* Address of the vector table (from linker script) */
+
+extern uint32_t _vectors[];
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: sam_nmi, sam_busfault, sam_usagefault, sam_pendsv, sam_dbgmonitor,
+ *       sam_reserved
+ *
+ * Description:
+ *   Handlers for system exceptions.  These output a diagnostic message and
+ *   call PANIC().  They are registered under CONFIG_DEBUG_FEATURES only.
+ ****************************************************************************/
+
+#ifdef CONFIG_DEBUG_FEATURES
+static int sam_nmi(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! NMI received\n");
+  PANIC();
+  return 0;
+}
+
+static int sam_busfault(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Bus fault received: %08" PRIx32 "\n", getreg32(NVIC_CFAULTS));
+  PANIC();
+  return 0;
+}
+
+static int sam_usagefault(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Usage fault received: %08" PRIx32 "\n", getreg32(NVIC_CFAULTS));
+  PANIC();
+  return 0;
+}
+
+static int sam_pendsv(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! PendSV received\n");
+  PANIC();
+  return 0;
+}
+
+static int sam_dbgmonitor(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Debug Monitor received\n");
+  PANIC();
+  return 0;
+}
+
+static int sam_reserved(int irq, void *context, void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Reserved interrupt\n");
+  PANIC();
+  return 0;
+}
+#endif /* CONFIG_DEBUG_FEATURES */
 
 static int sam_irqinfo(int irq, uintptr_t *regaddr, uint32_t *bit,
                        int offset)
@@ -102,31 +166,51 @@ static int sam_irqinfo(int irq, uintptr_t *regaddr, uint32_t *bit,
 
 void up_irqinitialize(void)
 {
-  uint32_t regaddr;
-  int num_priority_registers;
+  uintptr_t regaddr;
+  int nintlines;
   int i;
 
-  /* Disable all interrupts */
+  /* The NVIC ICTR register (bits 0-4) holds the number of interrupt lines
+   * that the NVIC supports in groups of 32.
+   * nintlines = (INTLINESNUM + 1) = number of 32-IRQ groups.
+   * For CA90 with 222 IRQs: INTLINESNUM=6, nintlines=7.
+   */
 
-  for (i = 0; i < SAM_IRQ_NEXTINT; i += 32)
+  nintlines = (getreg32(NVIC_ICTR) & NVIC_ICTR_INTLINESNUM_MASK) + 1;
+
+  /* Disable all interrupts.  There are nintlines interrupt clear registers. */
+
+  for (i = nintlines, regaddr = NVIC_IRQ0_31_CLEAR;
+       i > 0;
+       i--, regaddr += 4)
     {
-      putreg32(0xffffffff, NVIC_IRQ_CLEAR(i));
+      putreg32(0xffffffff, regaddr);
     }
 
-  /* Set all interrupts (and exceptions) to the default priority */
+  /* Affirm the vector table address — BootROM sets this to 0x08000000 before
+   * calling __start(), and __start() writes it again as its very first
+   * instruction.  Writing it a third time here (following SAMV7 practice)
+   * ensures it is correct by the time any exception can be dispatched.
+   */
 
-  num_priority_registers = (SAM_IRQ_NEXTINT + 3) / 4;
-  for (i = 0; i < num_priority_registers; i++)
-    {
-      regaddr = NVIC_IRQ_PRIORITY(i);
-      putreg32(DEFPRIORITY32, regaddr);
-    }
+  putreg32((uint32_t)_vectors, NVIC_VECTAB);
 
-  /* Set the priority of the SVCall, PendSV, and SysTick exceptions */
+  /* Set all system handler exceptions to the default priority */
 
   putreg32(DEFPRIORITY32, NVIC_SYSH4_7_PRIORITY);
   putreg32(DEFPRIORITY32, NVIC_SYSH8_11_PRIORITY);
   putreg32(DEFPRIORITY32, NVIC_SYSH12_15_PRIORITY);
+
+  /* Set all peripheral IRQ priorities.  There are nintlines * 8 priority
+   * registers (each register covers 4 IRQs × 8-bit priority fields).
+   */
+
+  for (i = (nintlines << 3), regaddr = NVIC_IRQ0_3_PRIORITY;
+       i > 0;
+       i--, regaddr += 4)
+    {
+      putreg32(DEFPRIORITY32, regaddr);
+    }
 
   /* currents_regs is non-NULL only while processing an interrupt */
 
@@ -140,6 +224,25 @@ void up_irqinitialize(void)
 #ifdef CONFIG_ARM_MPU
   irq_attach(SAM_IRQ_MEMFAULT, arm_memfault, NULL);
   up_enable_irq(SAM_IRQ_MEMFAULT);
+#endif
+
+  /* Attach diagnostic handlers for all other system exceptions.
+   * These call PANIC() with an error message rather than silently looping,
+   * which makes root-cause analysis possible when an unexpected exception
+   * fires.  Enabled only under CONFIG_DEBUG_FEATURES to avoid overhead in
+   * release builds.
+   */
+
+#ifdef CONFIG_DEBUG_FEATURES
+  irq_attach(SAM_IRQ_NMI, sam_nmi, NULL);
+#  ifndef CONFIG_ARM_MPU
+  irq_attach(SAM_IRQ_MEMFAULT, arm_memfault, NULL);
+#  endif
+  irq_attach(SAM_IRQ_BUSFAULT, sam_busfault, NULL);
+  irq_attach(SAM_IRQ_USAGEFAULT, sam_usagefault, NULL);
+  irq_attach(SAM_IRQ_PENDSV, sam_pendsv, NULL);
+  irq_attach(SAM_IRQ_DBGMONITOR, sam_dbgmonitor, NULL);
+  irq_attach(SAM_IRQ_RESERVED, sam_reserved, NULL);
 #endif
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS

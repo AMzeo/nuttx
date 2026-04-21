@@ -41,16 +41,6 @@
 #include "chip.h"
 #include "arm_internal.h"
 
-void my_hardfault(void)
-{
-  volatile int x = 0;
-
-  while (1)
-  {
-    x++;
-  }
-}
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -91,29 +81,16 @@ unsigned _vectors[] locate_data(".vectors") =
   IDLE_STACK,
   (unsigned)&__start,
 
-  /* NMI: keep as infinite loop (should never fire in normal operation) */
-  [2] = (unsigned)&my_hardfault,
-
-  /* Fault exceptions: route through exception_common so NuttX's registered
-   * handlers run (arm_hardfault/arm_memfault/arm_busfault/arm_usagefault).
-   * These are attached via irq_attach() in sam_irq.c and output full
-   * diagnostics via PANIC() when CONFIG_DEBUG_HARDFAULT_ALERT=y.
-   * Routing to my_hardfault silently loops with no output — unusable for debug.
-   */
-  [3]  = (unsigned)&exception_common,   /* HardFault */
-  [4]  = (unsigned)&exception_common,   /* MemManage */
-  [5]  = (unsigned)&exception_common,   /* BusFault */
-  [6]  = (unsigned)&exception_common,   /* UsageFault */
-
-  /* Reserved (7-10): silent loop */
-  [7 ... 10] = (unsigned)&my_hardfault,
-
-  /* SVC (11): system call, DebugMon (12): reserved/loop,
-   * PendSV (14): context switch, SysTick (15): timer tick */
-  [11] = (unsigned)&exception_common,   /* SVC — system call */
-  [12 ... 13] = (unsigned)&my_hardfault,
-  [14] = (unsigned)&exception_common,   /* PendSV — context switch */
-  [15] = (unsigned)&exception_common,   /* SysTick — timer tick */
+  [2]       = (unsigned)&exception_common,  /* NMI */
+  [3]       = (unsigned)&exception_common,  /* HardFault */
+  [4]       = (unsigned)&exception_common,  /* MemManage */
+  [5]       = (unsigned)&exception_common,  /* BusFault */
+  [6]       = (unsigned)&exception_common,  /* UsageFault */
+  [7 ... 10] = (unsigned)&exception_common, /* Reserved */
+  [11]      = (unsigned)&exception_common,  /* SVC */
+  [12 ... 13] = (unsigned)&exception_common, /* DebugMon / Reserved */
+  [14]      = (unsigned)&exception_common,  /* PendSV */
+  [15]      = (unsigned)&exception_common,  /* SysTick */
 
   /* Peripheral IRQs */
   [16 ... (15 + ARMV7M_PERIPHERAL_INTERRUPTS)] = (unsigned)&exception_common

@@ -114,23 +114,30 @@
  */
 
 #define SAM_GCLK_NGEN               12   /* 12 generators                  */
-#define SAM_GCLK_NCH                56   /* 56 peripheral channels         */
+#define SAM_GCLK_NCH                62   /* 62 peripheral channels (0-61)  */
 
 /* =========================================================================
- * GCLK Peripheral Channel IDs for PIC32CZ CA90
- * Source: PIC32CZ8110CA80208_DFP instance files (verified)
+ * GCLK Peripheral Channel IDs for PIC32CZ CA80/CA90
+ * Source: PIC32CZ8110CA80208_DFP and PIC32CZ-CA90_DFP instance files.
+ * Both DFPs are identical for all channel assignments below.
+ *
+ * NOTE: Channels 3/4/5/6/18 differ from SAMD5x layout — see values below.
  * =========================================================================
  */
 
 #define GCLK_CHAN_DFLL48M_REF       0    /* DFLL48M reference clock        */
 #define GCLK_CHAN_DPLL0_REF         1    /* PLL0 GCLK reference input      */
 #define GCLK_CHAN_DPLL1_REF         2    /* PLL1 GCLK reference input      */
-#define GCLK_CHAN_SLOW              3    /* Slow clock (SERCOM slow, WDT)  */
-#define GCLK_CHAN_EIC               4    /* External Interrupt Controller  */
-#define GCLK_CHAN_FREQM_MSR         5    /* FREQM measure clock            */
-#define GCLK_CHAN_FREQM_REF         6    /* FREQM reference clock          */
+#define GCLK_CHAN_FREQM_MSR         3    /* FREQM measure clock            */
+#define GCLK_CHAN_FREQM_REF         4    /* FREQM reference clock          */
+#define GCLK_CHAN_EIC               5    /* External Interrupt Controller  */
 
-/* SERCOM core clocks – DFP verified (channel = SERCOM_GCLK_ID_CORE) */
+/* SERCOM slow clock — shared by all SERCOM instances (SERCOM*_GCLK_ID_SLOW)
+ * Channels 6-17 are unassigned / reserved. */
+
+#define GCLK_CHAN_SERCOM_SLOW       18   /* SERCOM slow clock (all SERCOM) */
+
+/* SERCOM core clocks – DFP verified (SERCOM*_GCLK_ID_CORE) */
 
 #define GCLK_CHAN_SERCOM0_CORE      21   /* SERCOM0 core                   */
 #define GCLK_CHAN_SERCOM1_CORE      22   /* SERCOM1 core                   */
@@ -143,42 +150,42 @@
 #define GCLK_CHAN_SERCOM8_CORE      29   /* SERCOM8 core                   */
 #define GCLK_CHAN_SERCOM9_CORE      30   /* SERCOM9 core                   */
 
-/* CAN */
+/* Timer/Counter for Control (TCC) — each instance has its OWN GCLK channel.
+ * Source: DFP instance/tcc*.h (TCC*_GCLK_ID, verified).
+ * NOTE: SAMD5x shared TCC channels — CA90 does NOT share. */
 
-#define GCLK_CHAN_CAN0              31
-#define GCLK_CHAN_CAN1              32
-#define GCLK_CHAN_CAN2              33
-#define GCLK_CHAN_CAN3              34
-#define GCLK_CHAN_CAN4              35
-#define GCLK_CHAN_CAN5              36
+#define GCLK_CHAN_TCC0              31   /* TCC0 — same value as TCC0_GCLK_ID in sam_tcc.h */
+#define GCLK_CHAN_TCC1              32
+#define GCLK_CHAN_TCC2              33
+#define GCLK_CHAN_TCC3              34
+#define GCLK_CHAN_TCC4              35
+#define GCLK_CHAN_TCC5              36
+#define GCLK_CHAN_TCC6              37
+#define GCLK_CHAN_TCC7              38
+#define GCLK_CHAN_TCC8              39
+#define GCLK_CHAN_TCC9              40
 
-/* Timer/Counter */
+/* ADC / AC / PTC — DFP instance/adc.h, ac.h, ptc.h verified */
 
-#define GCLK_CHAN_TCC0_TCC1         37
-#define GCLK_CHAN_TCC2              38
-#define GCLK_CHAN_TCC3_TCC4         39
-#define GCLK_CHAN_TCC5_TCC6         40
-#define GCLK_CHAN_TCC7_TCC8_TCC9    41
+#define GCLK_CHAN_ADC               41   /* ADC0-3 shared GCLK channel     */
+#define GCLK_CHAN_AC                42   /* Analog Comparator              */
+#define GCLK_CHAN_PTC               43   /* Peripheral Touch Controller    */
 
-/* ADC / AC / PTC */
+/* CAN-FD (MCAN) — DFP instance/can*.h CAN*_GCLK_ID verified */
 
-#define GCLK_CHAN_ADC               42
-#define GCLK_CHAN_AC                43
-#define GCLK_CHAN_PTC               44
+#define GCLK_CHAN_CAN0              46
+#define GCLK_CHAN_CAN1              47
+#define GCLK_CHAN_CAN2              48
+#define GCLK_CHAN_CAN3              49
+#define GCLK_CHAN_CAN4              50
+#define GCLK_CHAN_CAN5              51
 
-/* Storage / Audio */
+/* SDMMC — DFP instance/sdmmc*.h verified (channels 58-61)
+ * Each instance has a main clock and a slow clock channel. */
 
-#define GCLK_CHAN_SDHC0             45
-#define GCLK_CHAN_SDHC1             46
-#define GCLK_CHAN_I2S0              47
-#define GCLK_CHAN_I2S1              48
-
-/* Ethernet */
-
-#define GCLK_CHAN_GMAC              51
-
-/* Aliases */
-
-#define GCLK_CHAN_SERCOM_SLOW       GCLK_CHAN_SLOW
+#define GCLK_CHAN_SDMMC0            58   /* SDMMC0 main clock              */
+#define GCLK_CHAN_SDMMC0_SLOW       59   /* SDMMC0 slow clock              */
+#define GCLK_CHAN_SDMMC1            60   /* SDMMC1 main clock              */
+#define GCLK_CHAN_SDMMC1_SLOW       61   /* SDMMC1 slow clock              */
 
 #endif /* __ARCH_ARM_SRC_PIC32CZCA90_HARDWARE_SAM_GCLK_H */

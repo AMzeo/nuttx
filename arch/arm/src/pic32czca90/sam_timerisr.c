@@ -38,6 +38,20 @@
 #endif
 
 /****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: sam_timerisr
+ ****************************************************************************/
+
+static int sam_timerisr(int irq, FAR void *context, FAR void *arg)
+{
+  nxsched_process_timer();
+  return 0;
+}
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -66,7 +80,7 @@ void up_timer_initialize(void)
 
   /* Attach the timer interrupt vector */
 
-  irq_attach(SAM_IRQ_SYSTICK, (xcpt_t)nxsched_process_timer, NULL);
+  irq_attach(SAM_IRQ_SYSTICK, sam_timerisr, NULL);
 
   /* Enable SysTick interrupts */
 

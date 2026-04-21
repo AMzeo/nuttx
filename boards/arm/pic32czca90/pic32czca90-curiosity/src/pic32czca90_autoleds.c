@@ -10,9 +10,12 @@
  *
  * State machine (matches LED_* values in board.h):
  *   0 (STARTED/HEAPALLOCATE/IRQSENABLED) → no change
- *   1 (STACKCREATED)                     → LED0 on  (system running)
- *   2 (INIRQ/SIGNAL/ASSERTION)           → LED1 on  (activity)
+ *   1 (STACKCREATED)                     → LED0 on  (system booted)
+ *   2 (INIRQ/SIGNAL/ASSERTION)           → no change (LED1 is heartbeat)
  *   3 (PANIC)                            → LED0+LED1 blink (fault)
+ *
+ * LED1 heartbeat: pic32czca90_bringup() starts an LPWORK job that toggles
+ * LED1 at 1 Hz.  If LED1 stops blinking, the scheduler has stalled.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -46,8 +49,7 @@ void board_autoled_on(int led)
         sam_portwrite(PORT_LED0, false);  /* active LOW: drive LOW = on */
         break;
 
-      case LED_INIRQ:                   /* 2: interrupt / signal / assertion */
-        sam_portwrite(PORT_LED1, false);
+      case LED_INIRQ:                   /* 2: LED1 is heartbeat — no change */
         break;
 
       case LED_PANIC:                   /* 3: fault — both LEDs blink */
@@ -64,8 +66,7 @@ void board_autoled_off(int led)
 {
   switch (led)
     {
-      case LED_INIRQ:
-        sam_portwrite(PORT_LED1, true);   /* active LOW: drive HIGH = off */
+      case LED_INIRQ:                   /* LED1 is heartbeat — no change */
         break;
 
       case LED_PANIC:

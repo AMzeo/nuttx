@@ -10,15 +10,17 @@
  *     |
  *   PLL0: REFDIV=12, FBDIV=225, POSTDIV0=3 → 300 MHz
  *     |
- *     ├── GCLK0 (SRC=6, DIV=1)  →  300 MHz
- *     │     └── MCLK.CLKDIV[1]=2  →  150 MHz  →  CPU
- *     └── GCLK1 (SRC=6, DIV=2)  →  150 MHz  →  SERCOM1
- *           └── BAUD=64730 → 115200 baud
+ *     ├── GCLK0 (SRC=6, DIV=1)  →  300 MHz  →  CPU (MCLK CPUDIV=1)
+ *     └── GCLK1 (SRC=6, DIVSEL=1, DIV=0)  →  150 MHz  →  SERCOM1, TCC0
+ *           └── BAUD=64730 → 115200 baud; TCC0 → HRT (6.67 ns/tick)
  *
  *   OSCULP32K → GCLK3 (SRC=3, DIV=1) → 32.768 kHz (SERCOM slow, WDT)
  *
- * Note: MCLK.CLKDIV[1]=2 is written before switching GCLK0 to PLL0 and
- * kept permanently.  Effective CPU speed = 150 MHz.
+ * Note: MCLK.CLKDIV[0] (offset 0x000C) = CPU Clock Divider; BOARD_MCLK_CPUDIV=1
+ * → no division → CPU = GCLK0 = PLL0 = 300 MHz (cross-test verified).
+ * MCLK.CLKDIV[1] (offset 0x0010) is a separate domain divider; set to 2 matching
+ * Harmony GCLK0_Initialize.  The CKRDY read is a clock-domain barrier before the
+ * GCLK0 source switch to PLL0 — skipping it causes early boot hang.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -32,7 +34,7 @@
 #include "hardware/sam_oscctrl.h"
 #include "hardware/sam_osc32kctrl.h"
 #include "hardware/sam_gclk.h"
-#include "hardware/sam_nvmctrl.h"
+#include "hardware/sam_fcr.h"
 #include "hardware/sam_mclk.h"
 #include "sam_gclk.h"
 #include "sam_periphclks.h"
@@ -383,7 +385,29 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
 {
   int i;
 
-  /* CA90 FCR manages flash wait states automatically; no NVMCTRL write. */
+  /* Step 0 — FCR: enable clocks and set automatic wait states.
+   *
+   * FCR_CTRLA resets to 0x00000000 (FWS=0, AUTOWS=0). At 300 MHz the flash
+   * access time is ~25 ns → ceil(25 / 3.33 ns) = 8 wait states required.
+   * With FWS=0, every cache miss returns wrong data (silent corruption).
+   *
+   * Set AUTOWS=1 first — before any frequency increase — so the hardware
+   * tracks wait states automatically regardless of the final CPU frequency.
+   * The BootROM may already have set this; we set it explicitly so our
+   * boot path is independent of BootROM behavior.
+   *
+   * Harmony reference: CLOCK_Initialize() → FCR_Initialize() sets AUTOWS.
+   */
+
+  {
+    uint32_t clkmsk;
+    clkmsk  = getreg32(SAM_MCLK_CLKMSK(0));
+    clkmsk |= SAM_MCLK_CLKMSK_BIT(MCLK_ID_AHB_FCR) |
+              SAM_MCLK_CLKMSK_BIT(MCLK_ID_APB_FCR);
+    putreg32(clkmsk, SAM_MCLK_CLKMSK(0));
+  }
+
+  putreg32(FCR_CTRLA_AUTOWS, SAM_FCR_CTRLA);
 
   /* 1. Configure XOSC32K if needed */
 
@@ -417,11 +441,23 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
 
   sam_pll0_init();
 
-  /* 6. Set MCLK.CLKDIV[1]=2 before switching GCLK0 to PLL0 to prevent
-   *    momentary overspeed during the source change.
+  /* 6. Write MCLK.CLKDIV[1] and poll CKRDY before switching GCLK0 to PLL0.
+   *
+   *    DFP: MCLK_CLKDIV[0] (0x0C) = CPU divider — READ-ONLY / PAC write-protected.
+   *         Writing to 0x4405200C causes a bus fault. DO NOT touch it.
+   *         CPU stays at reset default CPUDIV=1 → CPU = GCLK0 = PLL0 = 300 MHz.
+   *
+   *    DFP: MCLK_CLKDIV[1] (0x10) = secondary domain divider — writable.
+   *         Set to 2, matching Harmony GCLK0_Initialize (plib_clock.c for CA80).
+   *         The CKRDY poll after this write provides the clock-domain barrier
+   *         before the GCLK0 source switch in step 7.
+   *         Skipping this sequence causes an early boot hang.
    */
 
-  putreg32(config->cpudiv, SAM_MCLK_CPUDIV);
+  /* CLKDIV[0] at 0x0C (CPU divider) is read-only / PAC write-protected.
+   * Writing to it causes a bus fault — do NOT touch it.
+   * CPU stays at reset default CPUDIV=1 → CPU = GCLK0 = 300 MHz. */
+  putreg32(2u, SAM_MCLK_CLKDIV1);  /* CLKDIV[1]=0x10: match Harmony; provides CKRDY barrier */
 
   while ((getreg32(SAM_MCLK_INTFLAG) & MCLK_INTFLAG_CKRDY) == 0)
     {

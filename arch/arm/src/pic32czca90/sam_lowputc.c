@@ -119,7 +119,7 @@ sam_usart_configure(const struct sam_usart_config_s * const config)
 
   ctrla = (USART_CTRLA_MODE_INTUSART  | (uint32_t)config->muxconfig |
            USART_CTRLA_ASYNCH | USART_CTRLA_CPOL_NORMAL |
-           USART_CTRLA_LSBFIRST);
+           USART_CTRLA_LSBFIRST | USART_CTRLA_IBON);
   ctrlb = (USART_CTRLB_TXEN | USART_CTRLB_RXEN);
 
   /* Set the number of stop bits */
