@@ -67,21 +67,20 @@ int sam_portconfig(port_pinset_t pinset)
   pin  = (pinset >> PORT_PIN_SHIFT) & 0x1f;
   func = (pinset >> PORT_FUNC_SHIFT) & 0xf;
 
-  /* Preload output value before enabling output direction.
-   * Harmony plib_port.c writes OUT then DIR so the pin never glitches.
-   * PORT_FLAG_OUTVAL_HIGH sets the bit in OUTSET; absence clears it.
+  /* Configure OUT register.
+   * For output pins: prevents glitch on direction change (Harmony sequence).
+   * For input pins with PULLEN: OUT=1 → pullup, OUT=0 → pulldown.
+   * PORT_FLAG_OUTVAL_HIGH is honoured regardless of whether OUTPUT is set,
+   * because pullup-configured peripheral-mux inputs need OUT=1 in OUTSET.
    */
 
-  if (pinset & PORT_FLAG_OUTPUT)
+  if (pinset & PORT_FLAG_OUTVAL_HIGH)
     {
-      if (pinset & PORT_FLAG_OUTVAL_HIGH)
-        {
-          putreg32(1 << pin, base + SAM_PORT_OUTSET_OFFSET);
-        }
-      else
-        {
-          putreg32(1 << pin, base + SAM_PORT_OUTCLR_OFFSET);
-        }
+      putreg32(1 << pin, base + SAM_PORT_OUTSET_OFFSET);
+    }
+  else if (pinset & PORT_FLAG_OUTPUT)
+    {
+      putreg32(1 << pin, base + SAM_PORT_OUTCLR_OFFSET);
     }
 
   /* Configure output direction */

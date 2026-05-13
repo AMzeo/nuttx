@@ -17,6 +17,7 @@
 
 #include "arm_internal.h"
 #include "nvic.h"
+#include "mpu.h"
 
 #include <arch/board/board.h>
 #include "sam_clockconfig.h"
@@ -119,6 +120,10 @@ void __start(void)
 #ifdef CONFIG_BUILD_PROTECTED
   sam_userspace();
 #endif
+
+  /* MPU nocache regions — DISABLED pending debug.
+   * TODO: enable once board boots reliably with MPU active.
+   * For now, sam_sqi.c uses manual DCCMVAC/DCIMVAC for coherency. */
 
   sam_board_initialize();
 

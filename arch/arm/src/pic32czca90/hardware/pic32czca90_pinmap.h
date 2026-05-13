@@ -136,6 +136,77 @@
                              PORT_FLAG_INEN | PORT_FLAG_PULLEN)
 
 /* =========================================================================
+ * SQI1 — SST26VF032BAT flash, CS0=PG03 (hardware-managed)
+ *
+ * Peripheral function H (index 7). Same physical pins as SDMMC1 (func I=8).
+ * Mux for SQI1 first in board_app_initialize, then remux to SDMMC1 after
+ * flash partitions are mounted.
+ *   PC30 = SQI1_SCK   (output only, no INEN)
+ *   PG03 = SQI1_CS0   (hardware-managed CS, INEN for status read)
+ *   PC31 = SQI1_IO0   (MOSI in SPI mode, bidirectional)
+ *   PG00 = SQI1_IO1   (MISO in SPI mode, bidirectional)
+ *   PG01 = SQI1_IO2   (WP# in QSPI mode, bidirectional)
+ *   PG02 = SQI1_IO3   (HOLD# in QSPI mode, bidirectional)
+ *
+ * IO2 (WP#) and IO3 (HOLD#) need pullups: in single-lane mode (DATAEN=0)
+ * the SQI peripheral does not drive these pins (HOLD=0, WP=0 in CFG).
+ * Without pullups IO3/HOLD# floats low — SST26 enters hold state and
+ * ignores all SCK cycles.  PORT pullup (PULLEN + OUT=1) keeps them high
+ * when the SQI peripheral is not actively driving.
+ * =========================================================================
+ */
+
+#define PORT_SQI1_CLK   (PORT_PORTC | PORT_FUNC(7) | PORT_PIN(30) | \
+                          PORT_FLAG_PMUXEN)
+#define PORT_SQI1_CS0   (PORT_PORTG | PORT_FUNC(7) | PORT_PIN(3)  | \
+                          PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                          PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_SQI1_IO0   (PORT_PORTC | PORT_FUNC(7) | PORT_PIN(31) | \
+                          PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SQI1_IO1   (PORT_PORTG | PORT_FUNC(7) | PORT_PIN(0)  | \
+                          PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SQI1_IO2   (PORT_PORTG | PORT_FUNC(7) | PORT_PIN(1)  | \
+                          PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                          PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_SQI1_IO3   (PORT_PORTG | PORT_FUNC(7) | PORT_PIN(2)  | \
+                          PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                          PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+
+/* =========================================================================
+ * SDMMC1 — micro-SD socket on Curiosity Ultra (EV16W43A)
+ *
+ * Peripheral function I (index 8) for SDMMC; function H (index 7) for SQI.
+ * SDMMC1 and SQI1 share these physical pins — only one active at a time.
+ *
+ * DS70005522C schematic / CA90 DFP instance/sdmmc1.h:
+ *   PC30 = SDMMC1_CLK  (output only, no INEN)
+ *   PG03 = SDMMC1_CMD  (bidirectional)
+ *   PC31 = SDMMC1_DAT0 (bidirectional)
+ *   PG00 = SDMMC1_DAT1 (bidirectional)
+ *   PG01 = SDMMC1_DAT2 (bidirectional)
+ *   PG02 = SDMMC1_DAT3 (bidirectional)
+ *   PC28 = SDMMC1_CD   (GPIO input, active LOW, pullup)
+ * =========================================================================
+ */
+
+#define PORT_SDMMC1_CLK   (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(30) | \
+                           PORT_FLAG_PMUXEN)
+#define PORT_SDMMC1_CMD   (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(3)  | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SDMMC1_DAT0  (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(31) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SDMMC1_DAT1  (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(0)  | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SDMMC1_DAT2  (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(1)  | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SDMMC1_DAT3  (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(2)  | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SDMMC1_CD    (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(28) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | PORT_FLAG_PULLEN | \
+                           PORT_FLAG_OUTVAL_HIGH)
+#define PIN_SDMMC1_CD     PORT_SDMMC1_CD  /* GPIO alias — used by sam_sdmmc.c */
+
+/* =========================================================================
  * CAN3 – DS70005522C schematic, ATA6561 transceiver J701
  * PD13 = CAN3_TX (PMUX G = function 6)
  * PC29 = CAN3_RX (PMUX G = function 6)

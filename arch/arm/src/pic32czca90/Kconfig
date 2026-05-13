@@ -175,8 +175,34 @@ config PIC32CZCA90_TCC9
 # CA90 has SQI (Serial Quad Interface), not QSPI
 
 config PIC32CZCA90_SQI
-	bool "SQI (Serial Quad Interface)"
+	bool
 	default n
+
+config PIC32CZCA90_SQI1
+	bool "SQI1 (Serial Quad Interface 1 — SST26 flash)"
+	default n
+	select PIC32CZCA90_SQI
+	select SPI
+
+config PIC32CZCA90_SDMMC1
+	bool "SDMMC1 (SD/MMC Host Controller 1)"
+	default n
+	select MMCSD_SDIO
+	select SDIO_BLOCKSETUP
+
+config PIC32CZCA90_SDMMC1_DMA
+	bool "SDMMC1 ADMA2 DMA transfers"
+	default y
+	depends on PIC32CZCA90_SDMMC1
+	select SDIO_DMA
+	---help---
+		Enable ADMA2 descriptor-based DMA for SDMMC1 transfers.
+		Disable to fall back to PIO (interrupt-driven) for DMA debugging.
+
+config PIC32CZCA90_SDMMC1_WIDTH_D1_D4
+	bool "SDMMC1 4-bit data bus"
+	default y
+	depends on PIC32CZCA90_SDMMC1
 
 config PIC32CZCA90_RTC
 	bool "Real Time Counter"
