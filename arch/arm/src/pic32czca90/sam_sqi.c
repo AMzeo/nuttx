@@ -881,15 +881,37 @@ void sam_sqi_enter_xip(void)
   sqi_putreg(SAM_SQI_XCON1_OFFSET, SQI_XCON1_SST26_READ);
   sqi_putreg(SAM_SQI_XCON2_OFFSET, SQI_XCON2_SST26_CS0);
 
-  /* 4. Restore CLKCON (XIP mode clears CLKDIV per hardware behavior doc 6b) */
+  /* 4. Restore CLKCON (XIP mode clears CLKDIV per hardware behavior doc 6b)
+   *    Timeout prevents infinite hang if peripheral is in bad state
+   *    (e.g., after PIO test leaves residual analog state). */
 
   sqi_putreg(SAM_SQI_CLKCON_OFFSET, SQI_CLKCON_EN);
-  while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
-    ;
+  {
+    volatile uint32_t tout = 100000u;
+    while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
+      {
+        if (--tout == 0)
+          {
+            /* Clock stuck — force SWRST and retry */
+            leave_critical_section(flags);
+            sqi_full_reset();
+            flags = enter_critical_section();
+            sqi_putreg(SAM_SQI_XCON1_OFFSET, SQI_XCON1_SST26_READ);
+            sqi_putreg(SAM_SQI_XCON2_OFFSET, SQI_XCON2_SST26_CS0);
+            sqi_putreg(SAM_SQI_CLKCON_OFFSET, SQI_CLKCON_EN);
+            tout = 100000u;
+          }
+      }
+  }
   sqi_putreg(SAM_SQI_CLKCON_OFFSET,
              SQI_CLKCON_EN | SQI_CLKCON_CLKDIV(SQI1_CLKDIV_50MHZ));
-  while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
-    ;
+  {
+    volatile uint32_t tout = 100000u;
+    while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
+      {
+        if (--tout == 0) break;
+      }
+  }
 
   __asm__ volatile ("dsb sy" ::: "memory");
 
@@ -997,9 +1019,12 @@ int sam_sqi_flash_cmd_write(FAR const uint8_t *txbuf, size_t txlen)
 
 static void sqi_full_reset(void)
 {
+  volatile uint32_t t;
+
   putreg8(SQI_CTRLA_SWRST, SAM_SQI1_CTRLA);
+  t = 100000u;
   while (getreg8(SAM_SQI1_SYNCBUSY) & SQI_SYNCBUSY_SWRST)
-    ;
+    { if (--t == 0) break; }
 
   /* Clear XIP registers — they persist through SWRST and can interfere
    * with DMA mode if sam_sqi_enter_xip() was previously called. */
@@ -1013,12 +1038,18 @@ static void sqi_full_reset(void)
              SQI_CFG_MODE_DMA | SQI_CFG_BURSTEN |
              SQI_CFG_DATAEN(0) | SQI_CFG_CSEN0 | SQI_CFG_RXBUFRST);
   sqi_putreg(SAM_SQI_CLKCON_OFFSET, SQI_CLKCON_EN);
-  while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
-    ;
+  {
+    volatile uint32_t t = 100000u;
+    while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
+      { if (--t == 0) break; }
+  }
   sqi_putreg(SAM_SQI_CLKCON_OFFSET,
              SQI_CLKCON_EN | SQI_CLKCON_CLKDIV(SQI1_CLKDIV_50MHZ));
-  while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
-    ;
+  {
+    volatile uint32_t t = 100000u;
+    while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
+      { if (--t == 0) break; }
+  }
   sqi_modreg(SAM_SQI_CFG_OFFSET, 0, SQI_CFG_SQIEN);
   sqi_putreg(SAM_SQI_CMDTHR_OFFSET,
              SQI_CMDTHR_RXCMDTHR(0x01u) | SQI_CMDTHR_TXCMDTHR(0x01u));
