@@ -115,6 +115,12 @@
 #define PORT_SERCOM3_PAD3   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(15) | \
                              PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC15 MISO */
 
+/* SERCOM5 I2C (EXT2 header) — PC25=SDA(PAD0), PC26=SCL(PAD1), mux D=3 */
+#define PORT_SERCOM5_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(25) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC25 SDA */
+#define PORT_SERCOM5_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(26) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC26 SCL */
+
 /* =========================================================================
  * On-board LEDs – DS70005522C Table 2-11
  * LED0: PB21 (active LOW, yellow) — initial state HIGH = LED off (Harmony: OUTSET then DIRSET)
