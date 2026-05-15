@@ -109,9 +109,11 @@
  */
 
 #define PORT_SERCOM3_PAD0   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(12) | \
-                             PORT_FLAG_PMUXEN)
+                             PORT_FLAG_PMUXEN)                          /* PC12 MOSI */
 #define PORT_SERCOM3_PAD1   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(13) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+                             PORT_FLAG_PMUXEN)                          /* PC13 SCK */
+#define PORT_SERCOM3_PAD3   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(15) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC15 MISO */
 
 /* =========================================================================
  * On-board LEDs – DS70005522C Table 2-11
