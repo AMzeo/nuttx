@@ -39,7 +39,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define I2C5_GCLK_GEN      6
+#define I2C5_GCLK_GEN      2
 #define I2C5_GCLK_FREQ     100000000u
 #define I2C5_SERCOM        5
 #define I2C5_BASE           SAM_SERCOM5_BASE

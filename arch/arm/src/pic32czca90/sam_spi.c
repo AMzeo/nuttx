@@ -38,7 +38,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define SPI3_GCLK_GEN      6
+#define SPI3_GCLK_GEN      2
 #define SPI3_GCLK_FREQ     100000000u
 #define SPI3_SERCOM        3
 #define SPI3_BASE           SAM_SERCOM3_BASE
@@ -327,6 +327,8 @@ static void sam_spi_exchange(FAR struct spi_dev_s *dev,
  * Public Functions
  ****************************************************************************/
 
+static bool g_spi3_initialized = false;
+
 FAR struct spi_dev_s *sam_spibus_initialize(int port)
 {
   if (port != SPI3_SERCOM)
@@ -335,6 +337,12 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
     }
 
   FAR struct sam_spidev_s *priv = &g_spi3_dev;
+
+  if (g_spi3_initialized)
+    {
+      return &priv->dev;
+    }
+
   uintptr_t base = priv->base;
 
   /* 1. Enable MCLK APB clock for SERCOM3 */
@@ -381,6 +389,8 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
   priv->actual = SPI3_GCLK_FREQ / (2u * (49u + 1u));  /* 1 MHz */
   priv->mode = SPIDEV_MODE0;
   priv->nbits = 8;
+
+  g_spi3_initialized = true;
 
   spiinfo("SERCOM3 SPI master initialized at %lu Hz\n",
           (unsigned long)priv->actual);
