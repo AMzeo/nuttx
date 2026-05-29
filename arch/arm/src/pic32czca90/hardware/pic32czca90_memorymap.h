@@ -117,7 +117,7 @@
 #define SAM_I2S0_BASE           0x46030000
 #define SAM_CAN1_BASE           0x46060000
 #define SAM_CAN2_BASE           0x46062000
-#define SAM_SDHC1_BASE          0x460A2000
+#define SAM_SDHC1_BASE          0x460A0000  /* DFP: SDMMC1_BASE_ADDRESS */
 
 /* =========================================================================
  * APB F (0x46800000 – 0x46FFFFFF) – DS60001749K Table 8-10

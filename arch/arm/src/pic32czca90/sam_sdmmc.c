@@ -200,8 +200,8 @@
  * Timeout and TCR constants.
  ****************************************************************************/
 
-#define SDMMC_CMDTIMEOUT        MSEC2TICK(100)
-#define SDMMC_LONGTIMEOUT       MSEC2TICK(500)
+#define SDMMC_CMDTIMEOUT        MSEC2TICK(200)
+#define SDMMC_LONGTIMEOUT       MSEC2TICK(2000)
 #define SDMMC_DTOCV_MAXTIMEOUT  SDMMC_TCR_DTCVAL_MAX  /* 0x0E */
 
 /****************************************************************************
@@ -1088,18 +1088,21 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
       break;
     }
 
-  /* Wait for CMD inhibit */
+  /* Wait for CMD inhibit (CMDINHC) and DATA inhibit (CMDINHD) to clear.
+   * CMDINHD must be clear before any command that uses the DAT line
+   * (writes, R1b responses).  Without this, a CMD23/CMD24 sent while the
+   * card is still programming the previous block causes CMDTEO. */
 
-  timeout = SDMMC_CMDTIMEOUT;
+  timeout = SDMMC_LONGTIMEOUT;
   start   = clock_systime_ticks();
 
   while ((sam_getreg(priv, SAM_SDMMC_PSR_OFFSET) &
-          SDMMC_PSR_CMDINHC) != 0)
+          (SDMMC_PSR_CMDINHC | SDMMC_PSR_CMDINHD)) != 0)
     {
       elapsed = clock_systime_ticks() - start;
       if (elapsed >= timeout)
         {
-          mcerr("Timeout waiting for CMD inhibit\n");
+          mcerr("Timeout waiting for CMD/DAT inhibit clear\n");
           return -EBUSY;
         }
     }
@@ -1289,16 +1292,26 @@ static int sam_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
   if (ret != OK)
     {
       /* After any command error PSR.CMDINHC stays set until SWRSTCMD.
-       * Without this reset every subsequent sam_sendcmd() times out.
-       */
+       * If DAT line is also stuck (CMDINHD=1), SWRSTDAT is required too —
+       * otherwise every subsequent command will timeout forever (field failure
+       * scenario: card internal error leaves DAT0 busy permanently).
+       * Harmony ErrorReset pattern: SWRSTCMD + SWRSTDAT together. */
+
+      uint8_t rst_bits = SDMMC_SRR_SWRSTCMD;
+
+      if (sam_getreg(priv, SAM_SDMMC_PSR_OFFSET) & SDMMC_PSR_CMDINHD)
+        {
+          rst_bits |= SDMMC_RESET_DATA;
+        }
 
       uint16_t rst_timeout = 200;
-      sam_putreg8(priv, SDMMC_SRR_SWRSTCMD, SAM_SDMMC_SRR_OFFSET);
-      while (sam_getreg8(priv, SAM_SDMMC_SRR_OFFSET) & SDMMC_SRR_SWRSTCMD)
+      sam_putreg8(priv, rst_bits, SAM_SDMMC_SRR_OFFSET);
+
+      while (sam_getreg8(priv, SAM_SDMMC_SRR_OFFSET) & rst_bits)
         {
           if (rst_timeout-- == 0)
             {
-              mcerr("CMD reset never completed\n");
+              mcerr("CMD/DAT reset never completed\n");
               break;
             }
 
@@ -1306,8 +1319,8 @@ static int sam_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
         }
 
       /* Remember the error so sam_recvshort/sam_recvshortcrc can report it.
-       * NISTR and EISTR are already cleared by the W1C write and SWRSTCMD
-       * above, so the recv functions cannot check them directly. */
+       * NISTR and EISTR are already cleared by the W1C write and software
+       * reset above, so the recv functions cannot check them directly. */
 
       priv->cmd_error = true;
     }

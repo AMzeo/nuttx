@@ -132,10 +132,14 @@
 #define GCLK_CHAN_FREQM_REF         4    /* FREQM reference clock          */
 #define GCLK_CHAN_EIC               5    /* External Interrupt Controller  */
 
-/* SERCOM slow clock — shared by all SERCOM instances (SERCOM*_GCLK_ID_SLOW)
+/* SERCOM slow clocks — NOT shared across all SERCOMs on CA90.
+ * Grouped by APB bridge (DFP-verified per-instance GCLK_ID_SLOW values).
  * Channels 6-17 are unassigned / reserved. */
 
-#define GCLK_CHAN_SERCOM_SLOW       18   /* SERCOM slow clock (all SERCOM) */
+#define GCLK_CHAN_SERCOM_SLOW_E     18   /* SERCOM0, 1, 4 (APB E bridge)   */
+#define GCLK_CHAN_SERCOM_SLOW_D     19   /* SERCOM2, 3, 5, 6 (APB D bridge)*/
+#define GCLK_CHAN_SERCOM_SLOW_C     20   /* SERCOM7, 8, 9 (APB C bridge)   */
+#define GCLK_CHAN_SERCOM_SLOW       18   /* Legacy alias — APB E only      */
 
 /* SERCOM core clocks – DFP verified (SERCOM*_GCLK_ID_CORE) */
 

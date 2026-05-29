@@ -2,10 +2,14 @@
 /****************************************************************************
  * arch/arm/src/pic32czca90/sam_i2c_master.c
  *
- * PIC32CZ CA90 SERCOM I2C master driver (polled mode).
+ * PIC32CZ CA90 SERCOM I2C master driver (interrupt-driven, SMEN=1).
  *
- * Harmony reference: plib_sercom5_i2c_master.c
- * Init: SWRST → CTRLB(SMEN) → BAUD → CTRLA(I2CM+ENABLE) → STATUS(IDLE)
+ * Architecture: NuttX semaphore-wait + ISR state machine.
+ * Matches Harmony plib_sercom5_i2c_master.c ISR pattern:
+ *   - MB fires after address/data byte transmitted (write path)
+ *   - SB fires after data byte received (read path)
+ *   - SMEN auto-ACK on DATA read for non-last bytes
+ *   - CMD=3+ACKACT=1 for last byte (NACK+STOP)
  *
  ****************************************************************************/
 
@@ -22,7 +26,10 @@
 #include <nuttx/irq.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/clock.h>
+
+#include <syslog.h>
 
 #include "arm_internal.h"
 #include "sam_port.h"
@@ -35,6 +42,8 @@
 #include "hardware/pic32czca90_pinmap.h"
 #include "sam_i2c_master.h"
 
+#include <arch/pic32czca90/pic32czca90_irq.h>
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -45,7 +54,10 @@
 #define I2C5_BASE           SAM_SERCOM5_BASE
 #define I2C5_DEFAULT_FREQ   400000u
 
-#define I2C_TIMEOUT_MS      100
+#define I2C5_IRQ_FIRST      SAM_IRQ_SERCOM5_6
+#define I2C5_IRQ_COUNT      7
+
+#define I2C_TIMEOUT_USEC    50000u
 
 /****************************************************************************
  * Private Types
@@ -57,6 +69,12 @@ struct sam_i2cdev_s
   uintptr_t           base;
   uint32_t            frequency;
   mutex_t             lock;
+  sem_t               waitsem;
+  volatile int        result;
+  struct i2c_msg_s   *msg;
+  volatile int        xfrd;
+  bool                is_read;
+  bool                last_msg;
 };
 
 /****************************************************************************
@@ -68,6 +86,11 @@ static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
 #ifdef CONFIG_I2C_RESET
 static int sam_i2c_reset(FAR struct i2c_master_s *dev);
 #endif
+static int i2c_interrupt(int irq, FAR void *context, FAR void *arg);
+
+static volatile uint32_t g_isr_count = 0;
+static volatile uint32_t g_isr_mb = 0;
+static volatile uint32_t g_isr_sb = 0;
 
 /****************************************************************************
  * Private Data
@@ -100,22 +123,24 @@ static inline void i2c_wait_syncbusy(uintptr_t base)
     }
 }
 
-static void i2c_set_frequency(FAR struct sam_i2cdev_s *priv, uint32_t freq)
+static void i2c_wakeup(FAR struct sam_i2cdev_s *priv, int result)
 {
+  priv->result = result;
+  nxsem_post(&priv->waitsem);
+}
+
+static void i2c_hw_setfrequency(FAR struct sam_i2cdev_s *priv, uint32_t freq)
+{
+  uintptr_t base = priv->base;
+
   if (priv->frequency == freq)
     {
       return;
     }
 
-  uintptr_t base = priv->base;
-
-  /* Disable to change baud */
-
   uint32_t ctrla = getreg32(base + SAM_I2C_CTRLA_OFFSET);
   putreg32(ctrla & ~I2C_CTRLA_ENABLE, base + SAM_I2C_CTRLA_OFFSET);
   i2c_wait_syncbusy(base);
-
-  /* BAUD = (f_GCLK / (2 * f_SCL)) - 5   (simplified, ignoring rise time) */
 
   uint32_t baud = (I2C5_GCLK_FREQ / (2u * freq)) - 5u;
   if (baud > 255)
@@ -125,60 +150,153 @@ static void i2c_set_frequency(FAR struct sam_i2cdev_s *priv, uint32_t freq)
 
   putreg32(baud & 0xFFu, base + SAM_I2C_BAUD_OFFSET);
 
-  /* Re-enable */
-
   putreg32(ctrla, base + SAM_I2C_CTRLA_OFFSET);
+  i2c_wait_syncbusy(base);
+
+  putreg16(I2C_STATUS_BUSSTATE_IDLE, base + SAM_I2C_STATUS_OFFSET);
   i2c_wait_syncbusy(base);
 
   priv->frequency = freq;
 }
 
-static int i2c_wait_busowner(uintptr_t base)
+/****************************************************************************
+ * Interrupt Handler
+ ****************************************************************************/
+
+static int i2c_interrupt(int irq, FAR void *context, FAR void *arg)
 {
-  clock_t start = clock_systime_ticks();
-  clock_t timeout = MSEC2TICK(I2C_TIMEOUT_MS);
+  FAR struct sam_i2cdev_s *priv = (FAR struct sam_i2cdev_s *)arg;
+  uintptr_t base = priv->base;
+  uint16_t status;
+  uint8_t intflag;
 
-  while (1)
-    {
-      uint8_t flags = getreg8(base + SAM_I2C_INTFLAG_OFFSET);
-      if (flags & (I2C_INT_MB | I2C_INT_SB))
-        {
-          return OK;
-        }
+  g_isr_count++;
+  intflag = getreg8(base + SAM_I2C_INTFLAG_OFFSET);
+  status = getreg16(base + SAM_I2C_STATUS_OFFSET);
 
-      if (flags & I2C_INT_ERROR)
-        {
-          return -EIO;
-        }
+  if (intflag & I2C_INT_MB) g_isr_mb++;
+  if (intflag & I2C_INT_SB) g_isr_sb++;
 
-      if ((clock_systime_ticks() - start) > timeout)
-        {
-          return -ETIMEDOUT;
-        }
-    }
-}
-
-static int i2c_check_errors(uintptr_t base)
-{
-  uint16_t status = getreg16(base + SAM_I2C_STATUS_OFFSET);
+  /* Error: arbitration lost */
 
   if (status & I2C_STATUS_ARBLOST)
     {
       putreg16(I2C_STATUS_ARBLOST, base + SAM_I2C_STATUS_OFFSET);
-      return -EAGAIN;
+      putreg8(I2C_INT_ALL, base + SAM_I2C_INTFLAG_OFFSET);
+      putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
+      i2c_wakeup(priv, -EAGAIN);
+      return OK;
     }
+
+  /* Error: bus error */
 
   if (status & I2C_STATUS_BUSERR)
     {
       putreg16(I2C_STATUS_BUSERR, base + SAM_I2C_STATUS_OFFSET);
-      return -EIO;
+      putreg8(I2C_INT_ALL, base + SAM_I2C_INTFLAG_OFFSET);
+      putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
+      i2c_wakeup(priv, -EIO);
+      return OK;
     }
 
-  if (status & I2C_STATUS_RXNACK)
+  /* MB: Master on Bus — write path (address sent or data byte sent) */
+
+  if (intflag & I2C_INT_MB)
     {
-      return -ENXIO;
+      if (status & I2C_STATUS_RXNACK)
+        {
+          /* Slave NACKed — issue STOP and report error */
+
+          uint32_t ctrlb = getreg32(base + SAM_I2C_CTRLB_OFFSET);
+          ctrlb |= I2C_CTRLB_CMD_STOP;
+          putreg32(ctrlb, base + SAM_I2C_CTRLB_OFFSET);
+          putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
+          i2c_wakeup(priv, -ENXIO);
+          return OK;
+        }
+
+      if (priv->is_read)
+        {
+          /* Address phase for read completed (MB fires after addr ACK).
+           * First data byte is now being clocked in. Do nothing here —
+           * SB will fire when the byte is ready. */
+
+          putreg8(I2C_INT_MB, base + SAM_I2C_INTFLAG_OFFSET);
+          return OK;
+        }
+
+      /* Write path: address or data byte was ACKed */
+
+      if (priv->xfrd >= priv->msg->length)
+        {
+          /* All bytes sent */
+
+          if (priv->last_msg)
+            {
+              uint32_t ctrlb = getreg32(base + SAM_I2C_CTRLB_OFFSET);
+              ctrlb &= ~I2C_CTRLB_CMD_MASK;
+              ctrlb |= I2C_CTRLB_CMD_STOP;
+              putreg32(ctrlb, base + SAM_I2C_CTRLB_OFFSET);
+            }
+
+          putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
+          i2c_wakeup(priv, OK);
+          return OK;
+        }
+
+      /* Send next data byte */
+
+      putreg32(priv->msg->buffer[priv->xfrd++],
+               base + SAM_I2C_DATA_OFFSET);
+      return OK;
     }
 
+  /* SB: Slave on Bus — read path (data byte received) */
+
+  if (intflag & I2C_INT_SB)
+    {
+      bool last_byte = (priv->xfrd == priv->msg->length - 1);
+
+      if (last_byte)
+        {
+          /* Last byte: NACK + STOP (or repeated START) before reading */
+
+          uint32_t ctrlb = getreg32(base + SAM_I2C_CTRLB_OFFSET);
+          ctrlb &= ~I2C_CTRLB_CMD_MASK;
+          ctrlb |= I2C_CTRLB_ACKACT;
+
+          if (priv->last_msg)
+            {
+              ctrlb |= I2C_CTRLB_CMD_STOP;
+            }
+          else
+            {
+              ctrlb |= I2C_CTRLB_CMD_RESTART;
+            }
+
+          putreg32(ctrlb, base + SAM_I2C_CTRLB_OFFSET);
+        }
+
+      /* Read DATA — for non-last bytes SMEN auto-ACK starts next byte */
+
+      priv->msg->buffer[priv->xfrd++] =
+          (uint8_t)(getreg32(base + SAM_I2C_DATA_OFFSET) & 0xFF);
+
+      if (priv->xfrd >= priv->msg->length)
+        {
+          /* All bytes received */
+
+          putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
+          i2c_wakeup(priv, OK);
+          return OK;
+        }
+
+      return OK;
+    }
+
+  /* Unexpected interrupt — clear and ignore */
+
+  putreg8(I2C_INT_ALL, base + SAM_I2C_INTFLAG_OFFSET);
   return OK;
 }
 
@@ -195,23 +313,71 @@ static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
 
   nxmutex_lock(&priv->lock);
 
+  /* Set frequency if changed */
+
+  if (msgs[0].frequency != priv->frequency)
+    {
+      i2c_hw_setfrequency(priv, msgs[0].frequency);
+    }
+
   for (int i = 0; i < count; i++)
     {
       FAR struct i2c_msg_s *msg = &msgs[i];
-      bool is_read = (msg->flags & I2C_M_READ) != 0;
-      bool is_last = (i == count - 1);
+      priv->msg = msg;
+      priv->xfrd = 0;
+      priv->result = -EBUSY;
+      priv->is_read = (msg->flags & I2C_M_READ) != 0;
+      priv->last_msg = (i == count - 1);
 
-      /* Set frequency if changed */
+      /* Wait for bus IDLE (first msg) or OWNER (subsequent) */
 
-      if (msg->frequency != priv->frequency)
-        {
-          i2c_set_frequency(priv, msg->frequency);
-        }
+      {
+        uint32_t guard = 1000000u;
+        while (1)
+          {
+            uint16_t st = getreg16(base + SAM_I2C_STATUS_OFFSET);
+            uint16_t busstate = st & I2C_STATUS_BUSSTATE_MASK;
 
-      /* Write address + R/W bit to ADDR register (triggers START) */
+            if (busstate == I2C_STATUS_BUSSTATE_IDLE)
+              {
+                break;
+              }
+
+            if (i > 0 && busstate == I2C_STATUS_BUSSTATE_OWNER)
+              {
+                break;
+              }
+
+            if (--guard == 0)
+              {
+                nxmutex_unlock(&priv->lock);
+                return -EBUSY;
+              }
+          }
+      }
+
+      /* Clear all interrupt flags */
+
+      putreg8(I2C_INT_ALL, base + SAM_I2C_INTFLAG_OFFSET);
+
+      /* Clear ACKACT (set ACK mode for reads) */
+
+      {
+        uint32_t ctrlb = getreg32(base + SAM_I2C_CTRLB_OFFSET);
+        ctrlb &= ~(I2C_CTRLB_ACKACT | I2C_CTRLB_CMD_MASK);
+        putreg32(ctrlb, base + SAM_I2C_CTRLB_OFFSET);
+        i2c_wait_syncbusy(base);
+      }
+
+      /* Enable MB + SB + ERROR interrupts */
+
+      putreg8(I2C_INT_MB | I2C_INT_SB | I2C_INT_ERROR,
+              base + SAM_I2C_INTENSET_OFFSET);
+
+      /* Write ADDR — triggers START (or repeated START if OWNER) */
 
       uint32_t addr_reg = I2C_ADDR_ADDR(msg->addr);
-      if (is_read)
+      if (priv->is_read)
         {
           addr_reg |= I2C_ADDR_RD;
         }
@@ -219,104 +385,48 @@ static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
       putreg32(addr_reg, base + SAM_I2C_ADDR_OFFSET);
       i2c_wait_syncbusy(base);
 
-      /* Wait for address phase to complete (MB flag for write, SB for read) */
+      /* Wait for ISR to complete the message (with timeout) */
 
-      ret = i2c_wait_busowner(base);
+      ret = nxsem_tickwait_uninterruptible(&priv->waitsem,
+              USEC2TICK(I2C_TIMEOUT_USEC));
+
+      /* Disable all SERCOM interrupts */
+
+      putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
+
       if (ret < 0)
         {
-          goto stop;
-        }
-
-      ret = i2c_check_errors(base);
-      if (ret < 0)
-        {
-          goto stop;
-        }
-
-      if (is_read)
-        {
-          /* Read transfer */
-
-          for (ssize_t j = 0; j < msg->length; j++)
+          static uint32_t tmo_cnt = 0;
+          if (tmo_cnt++ < 3)
             {
-              bool last_byte = (j == msg->length - 1);
-
-              if (last_byte && is_last)
-                {
-                  /* NACK + STOP after last byte of last message */
-
-                  putreg32(I2C_CTRLB_ACKACT | I2C_CTRLB_CMD_STOP,
-                           base + SAM_I2C_CTRLB_OFFSET);
-                }
-              else if (last_byte && !is_last)
-                {
-                  /* NACK (no stop, next message will restart) */
-
-                  putreg32(I2C_CTRLB_ACKACT | I2C_CTRLB_CMD_RESTART,
-                           base + SAM_I2C_CTRLB_OFFSET);
-                }
-              else
-                {
-                  /* ACK + continue reading */
-
-                  putreg32(I2C_CTRLB_CMD_READ,
-                           base + SAM_I2C_CTRLB_OFFSET);
-                }
-
-              i2c_wait_syncbusy(base);
-
-              if (!last_byte || !is_last)
-                {
-                  ret = i2c_wait_busowner(base);
-                  if (ret < 0)
-                    {
-                      goto stop;
-                    }
-                }
-
-              msg->buffer[j] = (uint8_t)(getreg32(base + SAM_I2C_DATA_OFFSET) & 0xFF);
-            }
-        }
-      else
-        {
-          /* Write transfer */
-
-          for (ssize_t j = 0; j < msg->length; j++)
-            {
-              putreg32(msg->buffer[j], base + SAM_I2C_DATA_OFFSET);
-              i2c_wait_syncbusy(base);
-
-              ret = i2c_wait_busowner(base);
-              if (ret < 0)
-                {
-                  goto stop;
-                }
-
-              ret = i2c_check_errors(base);
-              if (ret < 0)
-                {
-                  goto stop;
-                }
+              syslog(LOG_ERR,
+                     "I2C5 TIMEOUT: isr=%lu mb=%lu sb=%lu "
+                     "IF=0x%02x ST=0x%04x INTEN=0x%02x\n",
+                     (unsigned long)g_isr_count,
+                     (unsigned long)g_isr_mb,
+                     (unsigned long)g_isr_sb,
+                     (unsigned)getreg8(base + SAM_I2C_INTFLAG_OFFSET),
+                     (unsigned)getreg16(base + SAM_I2C_STATUS_OFFSET),
+                     (unsigned)getreg8(base + SAM_I2C_INTENSET_OFFSET));
             }
 
-          if (is_last)
-            {
-              /* Issue STOP */
+          putreg32(I2C_CTRLA_SWRST, base + SAM_I2C_CTRLA_OFFSET);
+          i2c_wait_syncbusy(base);
+          priv->frequency = 0;
+          sam_i2cbus_initialize(I2C5_SERCOM);
+          nxmutex_unlock(&priv->lock);
+          return -ETIMEDOUT;
+        }
 
-              putreg32(I2C_CTRLB_CMD_STOP, base + SAM_I2C_CTRLB_OFFSET);
-              i2c_wait_syncbusy(base);
-            }
+      if (priv->result < 0)
+        {
+          nxmutex_unlock(&priv->lock);
+          return priv->result;
         }
     }
 
   nxmutex_unlock(&priv->lock);
   return OK;
-
-stop:
-  putreg32(I2C_CTRLB_CMD_STOP, base + SAM_I2C_CTRLB_OFFSET);
-  i2c_wait_syncbusy(base);
-  nxmutex_unlock(&priv->lock);
-  return ret;
 }
 
 #ifdef CONFIG_I2C_RESET
@@ -325,10 +435,12 @@ static int sam_i2c_reset(FAR struct i2c_master_s *dev)
   FAR struct sam_i2cdev_s *priv = (FAR struct sam_i2cdev_s *)dev;
   uintptr_t base = priv->base;
 
+  putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
   putreg32(I2C_CTRLA_SWRST, base + SAM_I2C_CTRLA_OFFSET);
   i2c_wait_syncbusy(base);
 
   priv->frequency = 0;
+  nxsem_reset(&priv->waitsem, 0);
   return sam_i2cbus_initialize(I2C5_SERCOM) ? OK : -EIO;
 }
 #endif
@@ -345,38 +457,46 @@ FAR struct i2c_master_s *sam_i2cbus_initialize(int port)
     }
 
   FAR struct sam_i2cdev_s *priv = &g_i2c5_dev;
+
+  if (priv->frequency != 0)
+    {
+      return &priv->dev;
+    }
+
   uintptr_t base = priv->base;
+
+  /* Initialize semaphore (starts at 0 — first wait blocks) */
+
+  nxsem_init(&priv->waitsem, 0, 0);
 
   /* 1. Enable MCLK APB clock for SERCOM5 */
 
   sercom_enable(I2C5_SERCOM);
 
-  /* 2. Route GCLK6 (100 MHz) to SERCOM5 core clock */
+  /* 2. Route GCLK2 (100 MHz) to SERCOM5 core clock */
 
   sam_gclk_chan_enable(GCLK_CHAN_SERCOM5_CORE, I2C5_GCLK_GEN, false);
 
   /* 3. Configure GPIO pins: SDA=PC25/PAD0, SCL=PC26/PAD1 */
 
-  sam_portconfig(PORT_SERCOM5_PAD0);  /* PC25 SDA */
-  sam_portconfig(PORT_SERCOM5_PAD1);  /* PC26 SCL */
+  sam_portconfig(PORT_SERCOM5_PAD0);
+  sam_portconfig(PORT_SERCOM5_PAD1);
 
   /* 4. Software reset */
 
   putreg32(I2C_CTRLA_SWRST, base + SAM_I2C_CTRLA_OFFSET);
   i2c_wait_syncbusy(base);
 
-  /* 5. Enable smart mode */
+  /* 5. CTRLB: Smart mode enabled (Harmony pattern) */
 
   putreg32(I2C_CTRLB_SMEN, base + SAM_I2C_CTRLB_OFFSET);
   i2c_wait_syncbusy(base);
 
-  /* 6. Set baud: 400 kHz
-   *    BAUD = (100 MHz / (2 * 400000)) - 5 = 120 */
+  /* 6. BAUD: 400 kHz */
 
   putreg32(120u, base + SAM_I2C_BAUD_OFFSET);
 
-  /* 7. Configure CTRLA: I2C master, SDA hold 75ns, standard/fast mode,
-   *    FM slew rate, enable */
+  /* 7. CTRLA: I2C master, SDA hold 75ns, FM slew rate, enable */
 
   putreg32(I2C_CTRLA_MODE_I2CM |
            I2C_CTRLA_SDAHOLD_75NS |
@@ -391,10 +511,34 @@ FAR struct i2c_master_s *sam_i2cbus_initialize(int port)
   putreg16(I2C_STATUS_BUSSTATE_IDLE, base + SAM_I2C_STATUS_OFFSET);
   i2c_wait_syncbusy(base);
 
+  /* 9. Attach and enable only MB/SB/ERROR NVIC vectors.
+   * CA90 SERCOM5 has 7 lines — only enable the 3 we need.
+   * Line mapping (from pic32czca90_irq.h / DFP):
+   *   SERCOM5_6 (EXTINT+90) = ERROR
+   *   SERCOM5_0 (EXTINT+92) = MB (Master on Bus)
+   *   SERCOM5_1 (EXTINT+93) = SB (Slave on Bus)
+   * Do NOT enable TXFE/RXFF lines — FIFO flags can cause
+   * spurious ISR re-entry if the hardware gates them differently. */
+
+  irq_attach(SAM_IRQ_SERCOM5_6, i2c_interrupt, priv);
+  irq_attach(SAM_IRQ_SERCOM5_0, i2c_interrupt, priv);
+  irq_attach(SAM_IRQ_SERCOM5_1, i2c_interrupt, priv);
+  up_enable_irq(SAM_IRQ_SERCOM5_6);
+  up_enable_irq(SAM_IRQ_SERCOM5_0);
+  up_enable_irq(SAM_IRQ_SERCOM5_1);
+
+  /* Do NOT enable SERCOM interrupts yet — enabled per-transfer */
+
+  putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
+
   priv->frequency = I2C5_DEFAULT_FREQ;
 
-  i2cinfo("SERCOM5 I2C master initialized at %lu Hz\n",
-          (unsigned long)priv->frequency);
+  syslog(LOG_ERR, "I2C5 ISR init: CTRLA=0x%08lx CTRLB=0x%08lx "
+         "BAUD=0x%08lx STATUS=0x%04x\n",
+         (unsigned long)getreg32(base + SAM_I2C_CTRLA_OFFSET),
+         (unsigned long)getreg32(base + SAM_I2C_CTRLB_OFFSET),
+         (unsigned long)getreg32(base + SAM_I2C_BAUD_OFFSET),
+         (unsigned)getreg16(base + SAM_I2C_STATUS_OFFSET));
 
   return &priv->dev;
 }

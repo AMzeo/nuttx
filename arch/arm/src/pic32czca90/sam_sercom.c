@@ -28,21 +28,42 @@
  * Private Data
  ****************************************************************************/
 
-/* GCLK peripheral channel index for each SERCOM core clock */
+/* GCLK peripheral channel index for each SERCOM core clock.
+ * DFP-verified: SERCOM*_GCLK_ID_CORE values. */
 
 static const uint8_t g_sercom_gclk_chan[PIC32CZCA90_NSERCOM] =
 {
-  GCLK_CHAN_SERCOM0_CORE,   /* SERCOM0 */
-  GCLK_CHAN_SERCOM1_CORE,   /* SERCOM1 */
-  GCLK_CHAN_SERCOM2_CORE,   /* SERCOM2 */
-  GCLK_CHAN_SERCOM3_CORE,   /* SERCOM3 */
-  GCLK_CHAN_SERCOM4_CORE,   /* SERCOM4 - console */
-  GCLK_CHAN_SERCOM5_CORE,   /* SERCOM5 */
-  GCLK_CHAN_SERCOM6_CORE,   /* SERCOM6 */
-  GCLK_CHAN_SERCOM7_CORE,   /* SERCOM7 */
-}; /* PIC32CZCA90_NSERCOM=8: SERCOM0-7 only */
+  GCLK_CHAN_SERCOM0_CORE,   /* SERCOM0 — 21 */
+  GCLK_CHAN_SERCOM1_CORE,   /* SERCOM1 — 22 */
+  GCLK_CHAN_SERCOM2_CORE,   /* SERCOM2 — 23 */
+  GCLK_CHAN_SERCOM3_CORE,   /* SERCOM3 — 24 */
+  GCLK_CHAN_SERCOM4_CORE,   /* SERCOM4 — 25 (console) */
+  GCLK_CHAN_SERCOM5_CORE,   /* SERCOM5 — 26 */
+  GCLK_CHAN_SERCOM6_CORE,   /* SERCOM6 — 27 */
+  GCLK_CHAN_SERCOM7_CORE,   /* SERCOM7 — 28 */
+  GCLK_CHAN_SERCOM8_CORE,   /* SERCOM8 — 29 */
+  GCLK_CHAN_SERCOM9_CORE,   /* SERCOM9 — 30 */
+};
 
-/* MCLK_ID_APB for each SERCOM - used to compute CLKMSK register and bit */
+/* GCLK peripheral channel for each SERCOM slow clock.
+ * DFP-verified: NOT shared — grouped by APB bridge. */
+
+static const uint8_t g_sercom_gclk_slow[PIC32CZCA90_NSERCOM] =
+{
+  GCLK_CHAN_SERCOM_SLOW_E,  /* SERCOM0 — 18 (APB E) */
+  GCLK_CHAN_SERCOM_SLOW_E,  /* SERCOM1 — 18 (APB E) */
+  GCLK_CHAN_SERCOM_SLOW_D,  /* SERCOM2 — 19 (APB D) */
+  GCLK_CHAN_SERCOM_SLOW_D,  /* SERCOM3 — 19 (APB D) */
+  GCLK_CHAN_SERCOM_SLOW_E,  /* SERCOM4 — 18 (APB E) */
+  GCLK_CHAN_SERCOM_SLOW_D,  /* SERCOM5 — 19 (APB D) */
+  GCLK_CHAN_SERCOM_SLOW_D,  /* SERCOM6 — 19 (APB D) */
+  GCLK_CHAN_SERCOM_SLOW_C,  /* SERCOM7 — 20 (APB C) */
+  GCLK_CHAN_SERCOM_SLOW_C,  /* SERCOM8 — 20 (APB C) */
+  GCLK_CHAN_SERCOM_SLOW_C,  /* SERCOM9 — 20 (APB C) */
+};
+
+/* MCLK_ID_APB for each SERCOM — used to compute CLKMSK register and bit.
+ * DFP-verified: SERCOM*_MCLK_ID_APB values. */
 
 static const uint8_t g_sercom_mclk_id[PIC32CZCA90_NSERCOM] =
 {
@@ -54,7 +75,9 @@ static const uint8_t g_sercom_mclk_id[PIC32CZCA90_NSERCOM] =
   MCLK_ID_APB_SERCOM5,   /* 36 -> CLKMSK[1] bit  4 */
   MCLK_ID_APB_SERCOM6,   /* 37 -> CLKMSK[1] bit  5 */
   MCLK_ID_APB_SERCOM7,   /* 38 -> CLKMSK[1] bit  6 */
-}; /* PIC32CZCA90_NSERCOM=8: SERCOM0-7 only */
+  MCLK_ID_APB_SERCOM8,   /* 39 -> CLKMSK[1] bit  7 */
+  MCLK_ID_APB_SERCOM9,   /* 40 -> CLKMSK[1] bit  8 */
+};
 
 /****************************************************************************
  * Public Functions
@@ -105,13 +128,13 @@ void sercom_coreclk_configure(int sercom, int gclkgen, bool wrlock)
  * Name: sercom_slowclk_configure
  *
  * Description:
- *   Route a GCLK generator to the SERCOM slow clock (shared channel 3).
+ *   Route a GCLK generator to the SERCOM slow clock for this instance.
+ *   CA90 has per-bridge slow channels: 18 (APB E), 19 (APB D), 20 (APB C).
  *
  ****************************************************************************/
 
 void sercom_slowclk_configure(int sercom, int gclkgen)
 {
-  /* All SERCOMs share GCLK channel 18 for the slow clock (DFP: SERCOM*_GCLK_ID_SLOW=18) */
-
-  sam_gclk_chan_enable(GCLK_CHAN_SERCOM_SLOW, (uint8_t)gclkgen, false);
+  DEBUGASSERT((unsigned)sercom < PIC32CZCA90_NSERCOM);
+  sam_gclk_chan_enable(g_sercom_gclk_slow[sercom], (uint8_t)gclkgen, false);
 }

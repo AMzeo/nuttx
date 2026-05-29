@@ -108,18 +108,51 @@
  * =========================================================================
  */
 
-#define PORT_SERCOM3_PAD0   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(12) | \
-                             PORT_FLAG_PMUXEN)                          /* PC12 MOSI */
-#define PORT_SERCOM3_PAD1   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(13) | \
-                             PORT_FLAG_PMUXEN)                          /* PC13 SCK */
-#define PORT_SERCOM3_PAD3   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(15) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC15 MISO */
+#define PORT_SERCOM3_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(12) | \
+                             PORT_FLAG_PMUXEN)                          /* PC12 MOSI (func D=3, DFP-verified) */
+#define PORT_SERCOM3_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(13) | \
+                             PORT_FLAG_PMUXEN)                          /* PC13 SCK (func D=3, DFP-verified) */
+#define PORT_SERCOM3_PAD3   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(15) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC15 MISO (func D=3, DFP-verified) */
 
-/* SERCOM5 I2C (EXT2 header) — PC25=SDA(PAD0), PC26=SCL(PAD1), mux D=3 */
+/* SERCOM5 I2C (EXT2 header) — PC25=SDA(PAD0), PC26=SCL(PAD1), mux D=3
+ * Harmony plib_port.c: PINCFG=0x01 (PMUXEN only, NO INEN). */
 #define PORT_SERCOM5_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(25) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC25 SDA */
+                             PORT_FLAG_PMUXEN)                         /* PC25 SDA */
 #define PORT_SERCOM5_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(26) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC26 SCL */
+                             PORT_FLAG_PMUXEN)                         /* PC26 SCL */
+
+/* =========================================================================
+ * SERCOM8 SPI — PD24(MOSI/PAD0), PD25(SCK/PAD1), PD26(SS/PAD2), PD27(MISO/PAD3)
+ * All mux D=3, DFP-verified (PIC32CZ-CA90_DFP/1.7.168 pio/pic32cz8110ca90208.h)
+ * APB C bridge (base 0x45002000)
+ * =========================================================================
+ */
+
+#define PORT_SERCOM8_PAD0   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(24) | \
+                             PORT_FLAG_PMUXEN)                          /* PD24 MOSI */
+#define PORT_SERCOM8_PAD1   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(25) | \
+                             PORT_FLAG_PMUXEN)                          /* PD25 SCK */
+#define PORT_SERCOM8_PAD2   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(26) | \
+                             PORT_FLAG_PMUXEN)                          /* PD26 SS */
+#define PORT_SERCOM8_PAD3   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(27) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PD27 MISO */
+
+/* =========================================================================
+ * SERCOM9 SPI — PD28(MOSI/PAD0), PD29(SCK/PAD1), PE04(SS/PAD2), PE05(MISO/PAD3)
+ * All mux D=3, DFP-verified
+ * APB C bridge (base 0x45004000)
+ * =========================================================================
+ */
+
+#define PORT_SERCOM9_PAD0   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(28) | \
+                             PORT_FLAG_PMUXEN)                          /* PD28 MOSI */
+#define PORT_SERCOM9_PAD1   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(29) | \
+                             PORT_FLAG_PMUXEN)                          /* PD29 SCK */
+#define PORT_SERCOM9_PAD2   (PORT_PORTE | PORT_FUNC(3) | PORT_PIN(4) | \
+                             PORT_FLAG_PMUXEN)                          /* PE04 SS */
+#define PORT_SERCOM9_PAD3   (PORT_PORTE | PORT_FUNC(3) | PORT_PIN(5) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PE05 MISO */
 
 /* =========================================================================
  * On-board LEDs – DS70005522C Table 2-11

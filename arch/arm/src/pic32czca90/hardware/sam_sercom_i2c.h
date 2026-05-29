@@ -71,8 +71,8 @@
 #define I2C_CTRLB_CMD_SHIFT       16
 #define I2C_CTRLB_CMD_MASK        (0x3u << I2C_CTRLB_CMD_SHIFT)
 #define I2C_CTRLB_CMD_NOP         (0x0u << I2C_CTRLB_CMD_SHIFT)
-#define I2C_CTRLB_CMD_RESTART     (0x1u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + repeated start */
-#define I2C_CTRLB_CMD_READ        (0x2u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + read byte */
+#define I2C_CTRLB_CMD_BYTERD      (0x1u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + read next byte */
+#define I2C_CTRLB_CMD_RESTART     (0x2u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + repeated start */
 #define I2C_CTRLB_CMD_STOP        (0x3u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + stop */
 
 #define I2C_CTRLB_ACKACT          (1u << 18)  /* 0=ACK, 1=NACK on next read */
@@ -83,7 +83,10 @@
 
 #define I2C_INT_MB                (1u << 0)   /* Master on Bus */
 #define I2C_INT_SB                (1u << 1)   /* Slave on Bus */
+#define I2C_INT_TXFE              (1u << 3)   /* TX FIFO Empty */
+#define I2C_INT_RXFF              (1u << 4)   /* RX FIFO Full */
 #define I2C_INT_ERROR             (1u << 7)   /* Error */
+#define I2C_INT_ALL               0x9Bu       /* All INTFLAG bits (DFP mask) */
 
 /****************************************************************************
  * STATUS (offset 0x1A, R/W 16-bit)
