@@ -6,7 +6,7 @@
  * PIC32CZ CA90 Curiosity Ultra (EV16W43A) pin assignments — DS70005522C
  *
  * Console UART: SERCOM1, PC04 (PAD0 TX) / PC07 (PAD3 RX), function D
- *   → PKoB4 VCP (J700).  Confirmed from Harmony usart_echo_blocking.
+ *   → PKoB4 VCP (J700).
  *   PC21/PC22 are SERCOM4 EXT2 expansion pins — NOT the console.
  *
  * LEDs:  LED0=PB21 (active LOW), LED1=PB22 (active LOW) — DS70005522C §2-11
@@ -53,9 +53,8 @@
 /* =========================================================================
  * SERCOM1 – Console UART (PKoB4 VCP on J700)
  *
- * GROUND TRUTH: Harmony usart_echo_blocking example (confirmed working on
- * CA90 board) uses SERCOM1 with PC04 (TX, PAD0) and PC07 (RX, PAD3),
- * peripheral function D (value 3). TXPO=0, RXPO=3.
+ * SERCOM1: PC04 (TX, PAD0) and PC07 (RX, PAD3), function D (value 3).
+ * TXPO=0, RXPO=3.
  *
  * DS70005522C signal names:
  *   PC04 → SERCOM1 PAD0 → PKoB4 APP_VCP_TX (board TX to host RX)
@@ -109,14 +108,13 @@
  */
 
 #define PORT_SERCOM3_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(12) | \
-                             PORT_FLAG_PMUXEN)                          /* PC12 MOSI (func D=3, DFP-verified) */
+                             PORT_FLAG_PMUXEN)                          /* PC12 MOSI (func D=3) */
 #define PORT_SERCOM3_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(13) | \
-                             PORT_FLAG_PMUXEN)                          /* PC13 SCK (func D=3, DFP-verified) */
+                             PORT_FLAG_PMUXEN)                          /* PC13 SCK (func D=3) */
 #define PORT_SERCOM3_PAD3   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(15) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC15 MISO (func D=3, DFP-verified) */
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC15 MISO (func D=3) */
 
-/* SERCOM5 I2C (EXT2 header) — PC25=SDA(PAD0), PC26=SCL(PAD1), mux D=3
- * Harmony plib_port.c: PINCFG=0x01 (PMUXEN only, NO INEN). */
+/* SERCOM5 I2C (EXT2 header) — PC25=SDA(PAD0), PC26=SCL(PAD1), mux D=3 */
 #define PORT_SERCOM5_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(25) | \
                              PORT_FLAG_PMUXEN)                         /* PC25 SDA */
 #define PORT_SERCOM5_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(26) | \
@@ -124,8 +122,7 @@
 
 /* =========================================================================
  * SERCOM8 SPI — PD24(MOSI/PAD0), PD25(SCK/PAD1), PD26(SS/PAD2), PD27(MISO/PAD3)
- * All mux D=3, DFP-verified (PIC32CZ-CA90_DFP/1.7.168 pio/pic32cz8110ca90208.h)
- * APB C bridge (base 0x45002000)
+ * All mux D=3. APB C bridge (base 0x45002000)
  * =========================================================================
  */
 
@@ -140,8 +137,7 @@
 
 /* =========================================================================
  * SERCOM9 SPI — PD28(MOSI/PAD0), PD29(SCK/PAD1), PE04(SS/PAD2), PE05(MISO/PAD3)
- * All mux D=3, DFP-verified
- * APB C bridge (base 0x45004000)
+ * All mux D=3. APB C bridge (base 0x45004000)
  * =========================================================================
  */
 
@@ -156,7 +152,7 @@
 
 /* =========================================================================
  * On-board LEDs – DS70005522C Table 2-11
- * LED0: PB21 (active LOW, yellow) — initial state HIGH = LED off (Harmony: OUTSET then DIRSET)
+ * LED0: PB21 (active LOW, yellow) — initial state HIGH = LED off
  * LED1: PB22 (active LOW, yellow) — initial state HIGH = LED off
  * =========================================================================
  */
@@ -219,7 +215,7 @@
  * Peripheral function I (index 8) for SDMMC; function H (index 7) for SQI.
  * SDMMC1 and SQI1 share these physical pins — only one active at a time.
  *
- * DS70005522C schematic / CA90 DFP instance/sdmmc1.h:
+ * DS70005522C schematic:
  *   PC30 = SDMMC1_CLK  (output only, no INEN)
  *   PG03 = SDMMC1_CMD  (bidirectional)
  *   PC31 = SDMMC1_DAT0 (bidirectional)
@@ -270,5 +266,21 @@
                              PORT_FLAG_PMUXEN)
 #define PORT_CAN4_RX        (PORT_PORTA | PORT_FUNC(6) | PORT_PIN(30) | \
                              PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+
+/* TCC1 Waveform Outputs WO0-WO7: PB10-PB17, function F (mux 5) */
+
+#define PORT_TCC1_WO0       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(10) | PORT_FLAG_PMUXEN)
+#define PORT_TCC1_WO1       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(11) | PORT_FLAG_PMUXEN)
+#define PORT_TCC1_WO2       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(12) | PORT_FLAG_PMUXEN)
+#define PORT_TCC1_WO3       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(13) | PORT_FLAG_PMUXEN)
+#define PORT_TCC1_WO4       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(14) | PORT_FLAG_PMUXEN)
+#define PORT_TCC1_WO5       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(15) | PORT_FLAG_PMUXEN)
+#define PORT_TCC1_WO6       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(16) | PORT_FLAG_PMUXEN)
+#define PORT_TCC1_WO7       (PORT_PORTB | PORT_FUNC(5) | PORT_PIN(17) | PORT_FLAG_PMUXEN)
+
+/* TCC7 Waveform Outputs WO0-WO1: PA22-PA23, function F (mux 5) */
+
+#define PORT_TCC7_WO0       (PORT_PORTA | PORT_FUNC(5) | PORT_PIN(22) | PORT_FLAG_PMUXEN)
+#define PORT_TCC7_WO1       (PORT_PORTA | PORT_FUNC(5) | PORT_PIN(23) | PORT_FLAG_PMUXEN)
 
 #endif /* __ARCH_ARM_SRC_PIC32CZCA90_HARDWARE_PIC32CZCA90_PINMAP_H */

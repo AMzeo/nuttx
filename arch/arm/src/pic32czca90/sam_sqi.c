@@ -5,7 +5,7 @@
  *
  * NuttX SPI lower-half driver wrapping the PIC32CZ CA90 SQI1 peripheral.
  *
- * BD-DMA mode — PIO mode does not function on Michigan Ax (CA90) silicon.
+ * BD-DMA mode — production driver uses BD-DMA for all flash operations.
  *
  * Transfer model — half-duplex BDs:
  *   SQI DMA is half-duplex at the BD level.  TX BD (DIR=0) drives IO0
@@ -21,13 +21,13 @@
  *
  * Sequence per chunk (TX BD):
  *   1. Copy TX bytes to g_sqi_tx_buf.
- *   2. CFG |= RXBUFRST (flush RXFIFO, Harmony pattern).
+ *   2. CFG |= RXBUFRST (flush RXFIFO, flush stale data).
  *   3. Fill g_sqi_tx_desc: DESC_EN|CS_ASSERT|LAST_BD|CBD_INT_EN|BUFLEN(n).
  *   4. BDBASEADD = &g_sqi_tx_desc; BDCON = START|DMAEN.
  *   5. Poll INTSTAT for BDDONE; BDCON = 0; clear INTSTAT.
  *
  * Sequence per chunk (RX BD):
- *   1. CFG |= RXBUFRST (flush RXFIFO, Harmony pattern).
+ *   1. CFG |= RXBUFRST (flush RXFIFO, flush stale data).
  *   2. Fill g_sqi_rx_desc: DESC_EN|CS_ASSERT|LAST_BD|CBD_INT_EN|DIR|BUFLEN(n).
  *      bd_bufaddr = g_sqi_rx_buf (nocache).
  *   3. BDBASEADD = &g_sqi_rx_desc; BDCON = START|DMAEN.
@@ -39,8 +39,7 @@
  *   sqi_select(false) — toggle SQIEN to force CS high.
  *   LIFM=0 in bd_ctrl — CS stays asserted between sqi_exchange() calls.
  *
- * Reference: DFP PIC32CZ8110CA90208 component/sqi.h, instance/sqi1.h
- *            Harmony plib_sqi1.c (init sequence + DMATransfer pattern)
+ * Reference: PIC32CZ8110CA90208 component/sqi.h, instance/sqi1.h
  *
  ****************************************************************************/
 
@@ -727,7 +726,7 @@ int sam_sqi_flash_cmd_read(FAR struct spi_dev_s *dev,
 /****************************************************************************
  * Public Function: sam_sqibus_initialize
  *
- * Init sequence mirrors Harmony plib_sqi1.c SQI1_Initialize():
+ * Init sequence:
  *   GCLK/MCLK → pins → SWRST → CFG(DMA,BURSTEN,DATAEN=0,CSEN0) →
  *   CLKCON(EN→STABLE→CLKDIV) → SQIEN → CMDTHR(32,32) → INTTHR(1,1) →
  *   THR(1) → INTEN(PKTCOMP|BDDONE) → INTSIGEN(same) → BDCON=0
@@ -785,7 +784,7 @@ FAR struct spi_dev_s *sam_sqibus_initialize(int bus)
 
   sqi_putreg(SAM_SQI_CFG_OFFSET,
              SQI_CFG_MODE_DMA  |
-             SQI_CFG_BURSTEN   |   /* bit 11 — DFP-verified */
+             SQI_CFG_BURSTEN   |
              SQI_CFG_DATAEN(0) |   /* single-lane SPI */
              SQI_CFG_CSEN0);
 
@@ -811,23 +810,21 @@ FAR struct spi_dev_s *sam_sqibus_initialize(int bus)
   sqi_modreg(SAM_SQI_CFG_OFFSET, 0, SQI_CFG_SQIEN);
 
   /* 9. CMDTHR: RXCMDTHR=1 so DMA can consume RXFIFO with as few as 1 byte.
-   *    Harmony's 20 (decimal) works for bulk reads but stalls on 3-byte JEDEC
-   *    because the DMA waits for threshold bytes that never arrive. */
+   *    Higher values stall on short transfers (e.g. 3-byte JEDEC). */
 
   sqi_putreg(SAM_SQI_CMDTHR_OFFSET,
              SQI_CMDTHR_RXCMDTHR(0x01u) | SQI_CMDTHR_TXCMDTHR(0x01u));
 
-  /* 10. INTTHR: Harmony uses 1 for both */
+  /* 10. INTTHR = 1 for both RX and TX */
 
   sqi_putreg(SAM_SQI_INTTHR_OFFSET,
              SQI_INTTHR_RXINTTHR(0x01u) | SQI_INTTHR_TXINTTHR(0x01u));
 
-  /* 11. THR = 1 (Harmony always writes 1) */
+  /* 11. THR = 1 */
 
   sqi_putreg(SAM_SQI_THR_OFFSET, SQI_THR_THRES(1u));
 
-  /* 12. Enable internal events so INTSTAT reflects BDDONE/PKTCOMP
-   *     (Harmony enables both; we poll INTSTAT, no NVIC ISR) */
+  /* 12. Enable internal events so INTSTAT reflects BDDONE/PKTCOMP (polled) */
 
   sqi_putreg(SAM_SQI_INTEN_OFFSET,
              SQI_INTEN_BDDONEIE | SQI_INTEN_PKTCOMPIE);
@@ -882,8 +879,7 @@ void sam_sqi_enter_xip(void)
   sqi_putreg(SAM_SQI_XCON2_OFFSET, SQI_XCON2_SST26_CS0);
 
   /* 4. Restore CLKCON (XIP mode clears CLKDIV per hardware behavior doc 6b)
-   *    Timeout prevents infinite hang if peripheral is in bad state
-   *    (e.g., after PIO test leaves residual analog state). */
+   *    Timeout prevents infinite hang if peripheral is in bad state. */
 
   sqi_putreg(SAM_SQI_CLKCON_OFFSET, SQI_CLKCON_EN);
   {
@@ -1069,7 +1065,7 @@ static void sqi_full_reset(void)
  *
  * Send WREN (0x06) followed by a command, with ONE SWRST at the start.
  * NO SWRST between WREN and the command — preserves WEL.
- * Uses Harmony pattern: RXBUFRST + BDBASEADD + START per BD submission.
+ * Uses flush stale data: RXBUFRST + BDBASEADD + START per BD submission.
  * Returns 0 on success, -EIO on timeout.
  ****************************************************************************/
 

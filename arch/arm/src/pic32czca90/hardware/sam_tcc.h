@@ -5,9 +5,6 @@
  *
  * PIC32CZ CA90 TCC (Timer/Counter for Control) register definitions.
  *
- * All values verified against PIC32CZ8110CA80208_DFP component/tcc.h and
- * instance/tcc0.h (DFP file date: 2024-07-31).
- *
  * Key instance parameters for TCC0:
  *   TCC0_GCLK_ID      = 31   (GCLK peripheral channel)
  *   TCC0_MCLK_ID_APB  = 41   (MCLK APB clock enable ID → CLKMSK[1] bit 9)
@@ -24,7 +21,6 @@
 
 /* =========================================================================
  * Register Offsets (from TCC base address)
- * All verified from DFP component/tcc.h
  * =========================================================================
  */
 
@@ -42,8 +38,8 @@
 #define SAM_TCC_WAVE_OFFSET        0x003C  /* Waveform Control (R/W 32) */
 #define SAM_TCC_PER_OFFSET         0x0040  /* Period (R/W 32) */
 #define SAM_TCC_CC_OFFSET(n)       (0x0044 + (n) * 4)  /* Compare/Capture n (R/W 32) */
-#define SAM_TCC_PERBUF_OFFSET      0x0064  /* Period Buffer (R/W 32) */
-#define SAM_TCC_CCBUF_OFFSET(n)    (0x0068 + (n) * 4)  /* CC Buffer n (R/W 32) */
+#define SAM_TCC_PERBUF_OFFSET      0x006C  /* Period Buffer (R/W 32) — DFP verified */
+#define SAM_TCC_CCBUF_OFFSET(n)    (0x0070 + (n) * 4)  /* CC Buffer n (R/W 32) — DFP verified */
 
 /* =========================================================================
  * TCC0 Register Addresses
@@ -67,7 +63,6 @@
 
 /* =========================================================================
  * TCC_CTRLA Bits (offset 0x00, R/W 32)
- * DFP: TCC_CTRLA_*
  * =========================================================================
  */
 
@@ -78,7 +73,7 @@
 #define TCC_CTRLA_RESOLUTION_SHIFT   5
 #define TCC_CTRLA_RESOLUTION_NONE    (0u << 5)
 
-/* PRESCALER [10:8] — DFP-verified positions */
+/* PRESCALER [10:8] */
 #define TCC_CTRLA_PRESCALER_SHIFT    8
 #define TCC_CTRLA_PRESCALER_MSK      (7u << 8)
 #define TCC_CTRLA_PRESCALER_DIV1     (0u << 8)   /* No division (for HRT) */
@@ -97,7 +92,6 @@
 
 /* =========================================================================
  * TCC_CTRLBSET / TCC_CTRLBCLR Bits (offset 0x05/0x04, R/W 8)
- * DFP: TCC_CTRLBSET_*
  * =========================================================================
  */
 
@@ -116,7 +110,6 @@
 
 /* =========================================================================
  * TCC_SYNCBUSY Bits (offset 0x08, R 32)
- * DFP: TCC_SYNCBUSY_*
  * =========================================================================
  */
 
@@ -135,7 +128,6 @@
 
 /* =========================================================================
  * TCC_INTENCLR / TCC_INTENSET Bits (offsets 0x24/0x28, R/W 32)
- * DFP: TCC_INTENSET_* / TCC_INTENCLR_*
  * =========================================================================
  */
 
@@ -150,7 +142,6 @@
 
 /* =========================================================================
  * TCC_INTFLAG Bits (offset 0x2C, R/W 32) — write 1 to clear
- * DFP: TCC_INTFLAG_*
  * =========================================================================
  */
 
@@ -166,7 +157,6 @@
 
 /* =========================================================================
  * TCC_WAVE Bits (offset 0x3C, R/W 32)
- * DFP: TCC_WAVE_*
  * =========================================================================
  */
 
@@ -178,10 +168,8 @@
 
 /* =========================================================================
  * GCLK and MCLK IDs for TCC0-9
- * Source: PIC32CZ8110CA80208_DFP instance/tcc*.h (verified 2024-07-31)
- *
- * Note: Each TCC has its OWN GCLK channel (unlike SAMD5x which shared).
- *       CAN channels are 46-51 (NOT adjacent to TCC).
+ * Each TCC has its own GCLK channel.
+ * CAN channels are 46-51 (not adjacent to TCC).
  * =========================================================================
  */
 

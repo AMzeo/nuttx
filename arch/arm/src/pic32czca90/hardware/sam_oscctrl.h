@@ -6,13 +6,10 @@
  * PIC32CZ CA90 Oscillator Controller (OSCCTRL)
  * Base: 0x44040000
  *
- * Register offsets verified from PIC32CZ8110CA80208_DFP/component/oscctrl.h
- *
- * Clock strategy (Harmony-verified for CA90):
+ * Clock strategy:
  *   DFLL48M (48 MHz, free-running from reset) → PLL0 reference (REFSEL=2)
  *   PLL0: REFDIV=12, FBDIV=225 → 900 MHz VCO, POSTDIV0=3 → 300 MHz
- *   DFLLSYNC does NOT exist on CA90 (SAMD5x-only). sam_dfll_configure() is never called.
- *   NOT DPLL0/DPLL1 (those are SAMD5x registers that do NOT exist on CA90)
+ *   DFLLSYNC does NOT exist on CA90. sam_dfll_configure() is never called.
  *
  ****************************************************************************/
 
@@ -22,7 +19,7 @@
 #include "hardware/sam_memorymap.h"
 
 /* =========================================================================
- * Register Offsets – DFP verified
+ * Register Offsets
  * =========================================================================
  */
 
@@ -35,7 +32,7 @@
 #define SAM_OSCCTRL_DFLLCTRLA_OFFSET        0x002C  /* DFLL48M Control A     */
 #define SAM_OSCCTRL_DFLLCTRLB_OFFSET        0x0030  /* DFLL48M Control B     */
 #define SAM_OSCCTRL_DFLLVAL_OFFSET          0x0034  /* DFLL48M Value         */
-#define SAM_OSCCTRL_DFLLMUL_OFFSET          0x003C  /* DFLL48M Multiplier (DFP: component/oscctrl.h) */
+#define SAM_OSCCTRL_DFLLMUL_OFFSET          0x003C  /* DFLL48M Multiplier    */
 #define SAM_OSCCTRL_PLL0CTRL_OFFSET         0x0040  /* PLL0 Control          */
 #define SAM_OSCCTRL_PLL0FBDIV_OFFSET        0x0044  /* PLL0 Feedback Divider */
 #define SAM_OSCCTRL_PLL0REFDIV_OFFSET       0x0048  /* PLL0 Reference Divider*/
@@ -145,7 +142,6 @@
 
 /* =========================================================================
  * PLL0CTRL Register Bits (offset 0x0040, 32-bit)
- * Harmony-verified: REFSEL=2 (DFLL48M), BWSEL=1, ENABLE=1
  * =========================================================================
  */
 
@@ -205,9 +201,8 @@
 /* =========================================================================
  * Legacy DPLL compatibility aliases
  *
- * CA90 has NO DPLL0/DPLL1 registers. The "DPLL" name in older code actually
- * refers to the SAMD5x DPLL which is a completely different IP block from
- * the CA90 PLL0.
+ * CA90 has NO DPLL0/DPLL1 registers. The "DPLL" name in older NuttX code
+ * refers to a different IP block that does not exist on CA90.
  *
  * These aliases are provided ONLY to prevent compilation errors. The actual
  * DPLL-configure path is disabled via BOARD_DPLL0_ENABLE=FALSE in board.h,

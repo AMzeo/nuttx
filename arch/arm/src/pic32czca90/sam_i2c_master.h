@@ -30,5 +30,7 @@
 
 FAR struct i2c_master_s *sam_i2cbus_initialize(int port);
 
+void sam_i2c_print_stats(void);
+
 #endif /* __ASSEMBLY__ */
 #endif /* __ARCH_ARM_SRC_PIC32CZCA90_SAM_I2C_MASTER_H */

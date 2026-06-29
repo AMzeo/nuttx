@@ -12,8 +12,8 @@
  *  1. Clock enable: GCLK4 (100 MHz main) + GCLK5 (12 MHz slow) + MCLK AHB/APB.
  *
  *  2. Clock divider: reads CA0R.BASECLKF + CA1R.CLKMULT at runtime; uses
- *     programmable mode (CLKGSEL=1) when CLKMULT>0 (Harmony CA90 path),
- *     divided mode (CLKGSEL=0) as fallback — replaces SAMA5 prescaler+divisor.
+ *     programmable mode (CLKGSEL=1) when CLKMULT>0, divided mode (CLKGSEL=0)
+ *     as fallback — replaces SAMA5 prescaler+divisor.
  *
  *  3. DMA: ADMA2 (descriptor at SAM_SDMMC_ASAR_OFFSET @0x58) when
  *     CONFIG_PIC32CZCA90_SDMMC1_DMA=y. PIO (interrupt-driven) is the
@@ -32,8 +32,7 @@
  * IMPORTANT: SDMMC1 shares these pins with SQI1 (mux H = 7). Only one
  * peripheral may own the pins at a time. See init.c for the mux strategy.
  *
- * Reference: Harmony core_apps_pic32cz_ca8x_ca9x sdmmc_fat/plib_sdmmc1.c
- *            platforms/nuttx/NuttX/nuttx/arch/arm/src/sama5/sam_sdmmc.c
+ * Reference: arch/arm/src/sama5/sam_sdmmc.c (same SDMMC IP)
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -287,6 +286,8 @@ struct sam_dev_s
   uint32_t cd_invert;
 
   bool cmd_error;  /* true if sam_waitresponse detected a command error */
+  uint32_t last_tmr_cr;  /* last TMR+CR value written (retry/debug) */
+  uint32_t last_arg;     /* last ARG1R value written (retry) */
 };
 
 
@@ -620,19 +621,23 @@ static void sam_eventtimeout(wdparm_t arg)
   DEBUGASSERT((priv->waitevents & SDIOWAIT_TIMEOUT) != 0 ||
               priv->wkupevent != 0);
 
-  mcerr("WDOG: waitevents=%02x wkupevent=%02x"
-        " NISTR=%08" PRIx32 " NISIER=%08" PRIx32
-        " PSR=%08" PRIx32 " AESR=%02" PRIx32 "\n",
-        priv->waitevents, priv->wkupevent,
-        sam_getreg32(priv, SAM_SDMMC_NISTR_OFFSET),
-        sam_getreg(priv, SAM_SDMMC_NISIER_OFFSET),
-        sam_getreg(priv, SAM_SDMMC_PSR_OFFSET),
-        (uint32_t)sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET));
+  uint32_t nistr  = sam_getreg32(priv, SAM_SDMMC_NISTR_OFFSET);
+  uint32_t nisier = sam_getreg(priv, SAM_SDMMC_NISIER_OFFSET);
+  uint32_t psr    = sam_getreg(priv, SAM_SDMMC_PSR_OFFSET);
+  uint8_t  aesr   = sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET);
+
+  _err("SDMMC TIMEOUT: NISTR=%08" PRIx32 " NISIER=%08" PRIx32
+       " PSR=%08" PRIx32 " AESR=%02x\n", nistr, nisier, psr, aesr);
+  _err("  waitevents=%02x wkupevent=%02x xfrints=%08" PRIx32
+       " waitints=%08" PRIx32 "\n",
+       priv->waitevents, priv->wkupevent, priv->xfrints, priv->waitints);
 
   if ((priv->waitevents & SDIOWAIT_TIMEOUT) != 0)
     {
+      sam_putreg8(priv, SDMMC_SRR_SWRSTCMD | SDMMC_RESET_DATA,
+                  SAM_SDMMC_SRR_OFFSET);
+
       sam_endwait(priv, SDIOWAIT_TIMEOUT);
-      mcerr("ERROR: Timeout\n");
     }
 }
 
@@ -733,7 +738,7 @@ static int sam_interrupt(int irq, void *context, void *arg)
             }
 
           /* SW reset DAT lane — clears DAT inhibit so next transfer can start.
-           * Harmony ErrorReset(SDMMC_RESET_DAT) pattern. */
+           * Reset DAT line. */
 
           sam_putreg8(priv, SDMMC_RESET_DATA, SAM_SDMMC_SRR_OFFSET);
           while (sam_getreg8(priv, SAM_SDMMC_SRR_OFFSET) & SDMMC_RESET_DATA)
@@ -782,10 +787,15 @@ static int sam_interrupt(int irq, void *context, void *arg)
         }
     }
 
-  /* Clear all status bits captured at entry (Harmony pattern: write back at
-   * ISR end so no set bit survives to re-trigger the level-sensitive NVIC). */
+  /* Clear status bits captured at entry (write back at
+   * ISR end so no set bit survives to re-trigger the level-sensitive NVIC).
+   *
+   * CRITICAL: preserve CC (Command Complete, bit 0) — sam_waitresponse()
+   * polls NISTR for CC.  If we clear it here, the polling loop never sees
+   * the command response and times out (false ETIMEDOUT).  CC is never in
+   * NISIER during polling mode, so leaving it set won't re-trigger NVIC. */
 
-  sam_putreg(priv, nistr, SAM_SDMMC_NISTR_OFFSET);
+  sam_putreg(priv, nistr & ~SDMMC_INT_CC, SAM_SDMMC_NISTR_OFFSET);
 
   return OK;
 }
@@ -807,7 +817,7 @@ static void sam_reset(struct sdio_dev_s *dev)
   sam_putreg16(priv, 0, SAM_SDMMC_NISIER_OFFSET);
   sam_putreg16(priv, 0, SAM_SDMMC_EISIER_OFFSET);
 
-  /* Software reset all (Harmony: SRR |= SWRSTALL, wait) */
+  /* Software reset all */
 
   sam_putreg8(priv, SDMMC_RESET_ALL, SAM_SDMMC_SRR_OFFSET);
   timeout_ms = 1000;
@@ -823,17 +833,17 @@ static void sam_reset(struct sdio_dev_s *dev)
       usleep(100);
     }
 
-  /* Clear all status registers (W1C) — Harmony: EISTR=Msk, NISTR=Msk */
+  /* Clear all status registers (W1C) */
 
   sam_putreg16(priv, SDMMC_EISTR_ALL, SAM_SDMMC_EISTR_OFFSET);
   sam_putreg16(priv, 0x01FFu,         SAM_SDMMC_NISTR_OFFSET);
 
-  /* Enable all normal and error status bits — Harmony: NISTER=Msk, EISTER=Msk.
+  /* Enable all normal and error status bits.
    * Combined 32-bit write: [15:0]=NISTER, [31:16]=EISTER. */
 
   sam_putreg(priv, SDMMC_INT_ALL, SAM_SDMMC_NISTER_OFFSET);
 
-  /* Maximum data timeout — Harmony: TCR = DTCVAL(0xE) */
+  /* Maximum data timeout */
 
   sam_putreg8(priv, SDMMC_TCR_DTCVAL_MAX, SAM_SDMMC_TCR_OFFSET);
 
@@ -849,27 +859,19 @@ static void sam_reset(struct sdio_dev_s *dev)
 #endif
   sam_putreg8(priv, hc1, SAM_SDMMC_HC1R_OFFSET);
 
-  /* SD Bus Voltage = 3.3V, Power On — Harmony: PCR = SDBVSEL_3V3 | SDBPWR_ON.
+  /* SD Bus Voltage = 3.3V, Power On.
    * SWRSTALL resets PCR to 0 (power off).  Without this write the card has
-   * no VDD and cannot respond to any command (CMDTOE+CMDCRC on every xfer).
-   * Must be set here so every SWRSTALL — including the one triggered by the
-   * NuttX mmcsd layer via sdio_reset() — restores card power. */
+   * no VDD and cannot respond to any command (CMDTOE+CMDCRC on every xfer). */
 
   sam_putreg8(priv, (uint8_t)SDMMC_POWER_330, SAM_SDMMC_PCR_OFFSET);
 
-  /* Enable 400 kHz clock — Harmony ModuleInit step 7: ClockSet(400kHz).
-   *
-   * SWRSTALL clears CCR to 0 (INTCLKEN=0).  Without INTCLKEN=1 the
-   * SDMMC hardware debounce timer has no clock source: PSR.CARDSS stays
-   * 0 and the controller refuses to execute any command (fires immediate
-   * CMDTOE+CMDCRC even for CMD0 which expects no response).
-   *
-   * Harmony sets the 400 kHz clock BEFORE clearing HC1R and BEFORE
-   * enabling NISIER.  We follow the same order. */
+  /* Enable 400 kHz clock.  SWRSTALL clears CCR to 0 (INTCLKEN=0).
+   * Without INTCLKEN=1 the debounce timer has no clock: PSR.CARDSS stays
+   * 0 and the controller refuses all commands (CMDTOE+CMDCRC on CMD0). */
 
   sam_set_clock(priv, SDMMC_CLOCK_FREQ_400_KHZ);
 
-  /* Clear high-speed and bus-width bits — Harmony: HC1R &= ~(HSEN | DW) */
+  /* Clear high-speed and bus-width bits */
 
   hc1  = (uint8_t)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET);
   hc1 &= (uint8_t)~((uint8_t)SDMMC_HC1_HSEN | (uint8_t)SDMMC_HC1_DTW_MASK);
@@ -1102,15 +1104,18 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
       elapsed = clock_systime_ticks() - start;
       if (elapsed >= timeout)
         {
-          mcerr("Timeout waiting for CMD/DAT inhibit clear\n");
+          mcwarn("CMD%d: CMDINHC/D stuck (%lu ticks) PSR=%08" PRIx32 "\n",
+                 (int)((cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT),
+                 (unsigned long)elapsed,
+                 sam_getreg(priv, SAM_SDMMC_PSR_OFFSET));
           return -EBUSY;
         }
     }
 
 
-  /* Harmony pattern: clear pending status, write NISIER/EISIER, then
-   * trigger the command — all in one critical section.  This closes the
-   * race where a stale TC/DINT bit in NISTR fires a spurious ISR between
+  /* Clear pending status, write NISIER/EISIER, then trigger the command
+   * — all in one critical section.  This closes the race where a stale
+   * TC/DINT bit in NISTR fires a spurious ISR between
    * configxfrints returning and the command actually starting.
    *
    * EISIER = nisier_v >> 16 (selective, not 0xFFFF): only enable error signals
@@ -1135,7 +1140,7 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
 
     isrflags  = enter_critical_section();
 
-    /* Clear all pending W1C status bits (Harmony: NISTR=0x01FF, EISTR=0x03FF) */
+    /* Clear all pending W1C status bits */
 
     sam_putreg16(priv, 0x01ffu,         SAM_SDMMC_NISTR_OFFSET);
     sam_putreg16(priv, SDMMC_EISTR_ALL, SAM_SDMMC_EISTR_OFFSET);
@@ -1145,6 +1150,8 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
     sam_putreg16(priv, nisier_reg, SAM_SDMMC_NISIER_OFFSET);
     sam_putreg16(priv, eisier_reg, SAM_SDMMC_EISIER_OFFSET);
 
+    priv->last_arg    = arg;
+    priv->last_tmr_cr = regval;
     sam_putreg(priv, arg,    SAM_SDMMC_ARG1R_OFFSET);
     sam_putreg(priv, regval, SAM_SDMMC_TMR_OFFSET);
 
@@ -1202,6 +1209,7 @@ static int sam_sendsetup(struct sdio_dev_s *dev,
 static int sam_cancel(struct sdio_dev_s *dev)
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
+  uint16_t timeout;
 
   sam_configxfrints(priv, 0);
   sam_configwaitints(priv, 0, 0, 0);
@@ -1218,6 +1226,25 @@ static int sam_cancel(struct sdio_dev_s *dev)
   priv->buffer    = 0;
   priv->remaining = 0;
   priv->xfrints   = 0;
+
+  /* Abort any in-progress transfer by resetting CMD and DAT lines.
+   * Without this, a timed-out ADMA2 transfer leaves DLACT set and
+   * CMDINHD asserted — all subsequent commands fail permanently. */
+
+  sam_putreg8(priv, SDMMC_SRR_SWRSTCMD | SDMMC_RESET_DATA,
+              SAM_SDMMC_SRR_OFFSET);
+
+  timeout = 200;
+  while (sam_getreg8(priv, SAM_SDMMC_SRR_OFFSET) &
+         (SDMMC_SRR_SWRSTCMD | SDMMC_RESET_DATA))
+    {
+      if (timeout-- == 0)
+        {
+          break;
+        }
+
+      up_udelay(10);
+    }
 
   return OK;
 }
@@ -1261,13 +1288,9 @@ static int sam_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
       nistr = sam_getreg(priv, SAM_SDMMC_NISTR_OFFSET);
       if ((nistr & SDMMC_RESPERR_INTS) != 0)
         {
-          uint32_t psr = sam_getreg(priv, SAM_SDMMC_PSR_OFFSET);
-          uint16_t ccr = sam_getreg16(priv, SAM_SDMMC_CCR_OFFSET);
-          uint8_t  pcr = (uint8_t)sam_getreg8(priv, SAM_SDMMC_PCR_OFFSET);
-          mcerr("CMD%d error NISTR=%08" PRIx32 " PSR=%08" PRIx32
-                " CCR=%04" PRIx32 " PCR=%02" PRIx32 "\n",
+          mcerr("CMD%d error NISTR=%08" PRIx32 " PSR=%08" PRIx32 "\n",
                 (int)((cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT),
-                nistr, psr, (uint32_t)ccr, (uint32_t)pcr);
+                nistr, sam_getreg(priv, SAM_SDMMC_PSR_OFFSET));
           ret = -EIO;
           break;
         }
@@ -1280,7 +1303,10 @@ static int sam_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
       elapsed = clock_systime_ticks() - start;
       if (elapsed >= timeout)
         {
-          mcerr("Timeout waiting for response\n");
+          mcwarn("CMD%d: no response (%lu ticks) PSR=%08" PRIx32 "\n",
+                 (int)((cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT),
+                 (unsigned long)elapsed,
+                 sam_getreg(priv, SAM_SDMMC_PSR_OFFSET));
           ret = -ETIMEDOUT;
           break;
         }
@@ -1295,7 +1321,7 @@ static int sam_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
        * If DAT line is also stuck (CMDINHD=1), SWRSTDAT is required too —
        * otherwise every subsequent command will timeout forever (field failure
        * scenario: card internal error leaves DAT0 busy permanently).
-       * Harmony ErrorReset pattern: SWRSTCMD + SWRSTDAT together. */
+       * SWRSTCMD + SWRSTDAT together. */
 
       uint8_t rst_bits = SDMMC_SRR_SWRSTCMD;
 
@@ -1519,8 +1545,6 @@ static int sam_registercallback(struct sdio_dev_s *dev,
 
 /****************************************************************************
  * ADMA2 DMA setup (when CONFIG_PIC32CZCA90_SDMMC1_DMA=y)
- *
- * Harmony reference: plib_sdmmc1.c SDMMC_DMASetup()
  * Single descriptor covers the full transfer buffer (max 65535 bytes).
  * D-cache must be coherent: invalidate RX before DMA, clean TX before DMA,
  * clean descriptor table before writing its address to ASAR.
@@ -1699,9 +1723,7 @@ static void sam_set_uhs_timing(struct sam_dev_s *priv,
 }
 
 /****************************************************************************
- * Clock setup — matches Harmony plib_sdmmc1.c SDMMC1_ClockSet() exactly.
- *
- * Reads CA0R.BASECLKF and CA1R.CLKMULT from hardware at runtime.
+ * Clock setup.  Reads CA0R.BASECLKF and CA1R.CLKMULT from hardware at runtime.
  * Programmable mode (CLKGSEL=1, CLKMULT>0):
  *   F_MULTCLK = baseclk × (CLKMULT + 1)
  *   divider   = F_MULTCLK / target − 1
@@ -1762,8 +1784,7 @@ static int sam_set_clock(struct sam_dev_s *priv, uint32_t clock)
             >> SDMMC_CA1R_CLKMULT_Pos;
 
   /* High-speed mode: set/clear HC1R.HSEN before programming divider.
-   * Harmony does this inside the CLKMULT>0 branch with the IP-limitation
-   * guard (if HSEN and div==0, force div=1). */
+   * IP limitation: if HSEN and div==0, force div=1. */
 
   hc1 = (uint8_t)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET);
   if (clock > SDMMC1_BUS_HIGH_SPEED_THRESHOLD)
@@ -1779,7 +1800,7 @@ static int sam_set_clock(struct sam_dev_s *priv, uint32_t clock)
 
   if (clkmul > 0u)
     {
-      /* Programmable mode (Harmony CA80/CA90 path):
+      /* Programmable mode:
        * F_SDCLK = (baseclk × (clkmul+1)) / (divider+1) */
 
       div = (baseclk * (clkmul + 1u)) / clock;
@@ -1838,7 +1859,7 @@ static int sam_set_clock(struct sam_dev_s *priv, uint32_t clock)
 /****************************************************************************
  * Power setup — query CA0R capabilities and apply bus voltage.
  *
- * Harmony reference: plib_sdmmc1.c SDMMC_InitCard() power/voltage sequence.
+ * Query CA0R capabilities and apply bus voltage.
  ****************************************************************************/
 
 static void sam_power(struct sam_dev_s *priv)
@@ -1879,12 +1900,12 @@ static void sam_power(struct sam_dev_s *priv)
 
 static int sam_set_interrupts(struct sam_dev_s *priv)
 {
-  /* Enable all normal + error status bits — matches Harmony NISTER=Msk, EISTER=Msk.
+  /* Enable all normal + error status bits.
    * Combined 32-bit write at NISTER_OFFSET: [15:0]=NISTER, [31:16]=EISTER. */
 
   sam_putreg(priv, SDMMC_INT_ALL, SAM_SDMMC_NISTER_OFFSET);
 
-  /* Signal only card insertion/removal via NVIC at init — Harmony: NISIER=CINS|CREM.
+  /* Signal only card insertion/removal via NVIC at init.
    * Per-transfer interrupt signals are programmed by sam_configwaitints(). */
 
   sam_putreg16(priv, (uint16_t)(SDMMC_INT_CINS | SDMMC_INT_CRM),
@@ -1898,7 +1919,6 @@ static int sam_set_interrupts(struct sam_dev_s *priv)
  *
  * Enables GCLK4 (100 MHz, channel 60) and GCLK5 (12 MHz, channel 61) for
  * SDMMC1, plus MCLK AHB (ID=71) and APB (ID=72) gates.
- * Mirrors Harmony plib_clock.c generator + channel + peripheral clock setup.
  ****************************************************************************/
 
 void sdmmc1_clk_enable(void)

@@ -310,3 +310,45 @@ void up_enable_irq(int irq)
 void arm_ack_irq(int irq)
 {
 }
+
+/****************************************************************************
+ * Name: up_prioritize_irq
+ *
+ * Description:
+ *   Set the priority of an IRQ.
+ *
+ *   Since this API is not supported on all architectures, it should be
+ *   avoided in common implementations where possible.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ARCH_IRQPRIO
+int up_prioritize_irq(int irq, int priority)
+{
+  uint32_t regaddr;
+  uint32_t regval;
+  int shift;
+
+  DEBUGASSERT(irq >= SAM_IRQ_MEMFAULT && irq < NR_IRQS &&
+              (unsigned)priority <= NVIC_SYSH_PRIORITY_MIN);
+
+  if (irq < SAM_IRQ_EXTINT)
+    {
+      regaddr = NVIC_SYSH_PRIORITY(irq);
+      irq    -= 4;
+    }
+  else
+    {
+      irq    -= SAM_IRQ_EXTINT;
+      regaddr = NVIC_IRQ_PRIORITY(irq);
+    }
+
+  regval      = getreg32(regaddr);
+  shift       = ((irq & 3) << 3);
+  regval     &= ~(0xff << shift);
+  regval     |= (priority << shift);
+  putreg32(regval, regaddr);
+
+  return OK;
+}
+#endif

@@ -5,10 +5,10 @@
  * PIC32CZ CA90 SERCOM peripheral clock enable.
  *
  * CA90 uses MCLK.CLKMSK[n] registers for peripheral APB clock enables.
- * There are NO APBxMASK registers on CA90 (those are SAMD5x-only).
+ * There are NO APBxMASK registers on CA90.
  *
  * Enable formula: CLKMSK[id/32] |= (1 << (id%32))
- * SERCOM MCLK_ID_APB values from PIC32CZ8110CA80208 DFP:
+ * SERCOM MCLK_ID_APB values:
  *   SERCOM0=31, SERCOM1=32, SERCOM2=33, SERCOM3=34, SERCOM4=35,
  *   SERCOM5=36, SERCOM6=37, SERCOM7=38, SERCOM8=39, SERCOM9=40
  *
@@ -29,7 +29,7 @@
  ****************************************************************************/
 
 /* GCLK peripheral channel index for each SERCOM core clock.
- * DFP-verified: SERCOM*_GCLK_ID_CORE values. */
+ * SERCOM*_GCLK_ID_CORE values. */
 
 static const uint8_t g_sercom_gclk_chan[PIC32CZCA90_NSERCOM] =
 {
@@ -46,7 +46,7 @@ static const uint8_t g_sercom_gclk_chan[PIC32CZCA90_NSERCOM] =
 };
 
 /* GCLK peripheral channel for each SERCOM slow clock.
- * DFP-verified: NOT shared — grouped by APB bridge. */
+ * NOT shared — grouped by APB bridge. */
 
 static const uint8_t g_sercom_gclk_slow[PIC32CZCA90_NSERCOM] =
 {
@@ -63,7 +63,7 @@ static const uint8_t g_sercom_gclk_slow[PIC32CZCA90_NSERCOM] =
 };
 
 /* MCLK_ID_APB for each SERCOM — used to compute CLKMSK register and bit.
- * DFP-verified: SERCOM*_MCLK_ID_APB values. */
+ * SERCOM*_MCLK_ID_APB values. */
 
 static const uint8_t g_sercom_mclk_id[PIC32CZCA90_NSERCOM] =
 {

@@ -2,9 +2,8 @@
 /****************************************************************************
  * arch/arm/src/pic32czca90/sam_spi.c
  *
- * PIC32CZ CA90 SERCOM SPI master driver (polled mode).
- *
- * Harmony reference: plib_sercom3_spi_master.c
+ * PIC32CZ CA90 SERCOM SPI master driver.
+ * Supports polled mode (small transfers) and DMA (large transfers).
  * Init sequence: CTRLB → BAUD → CTRLA(+ENABLE), SYNCBUSY after each.
  *
  ****************************************************************************/
@@ -22,6 +21,8 @@
 #include <nuttx/irq.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
+#include <nuttx/wdog.h>
 
 #include "arm_internal.h"
 #include "sam_port.h"
@@ -31,7 +32,9 @@
 #include "hardware/sam_sercom_spi.h"
 #include "hardware/sam_mclk.h"
 #include "hardware/sam_gclk.h"
+#include "hardware/sam_dma.h"
 #include "hardware/pic32czca90_pinmap.h"
+#include "sam_dmac.h"
 #include "sam_spi.h"
 
 /****************************************************************************
@@ -42,6 +45,11 @@
 #define SPI3_GCLK_FREQ     100000000u
 #define SPI3_SERCOM        3
 #define SPI3_BASE           SAM_SERCOM3_BASE
+
+#ifdef CONFIG_PIC32CZCA90_DMAC
+#  define SPI_DMA_THRESHOLD 4u
+#  define SPI_DMA_TIMEOUT   MSEC2TICK(800)
+#endif
 
 /****************************************************************************
  * Private Types
@@ -56,6 +64,15 @@ struct sam_spidev_s
   uint8_t          mode;
   uint8_t          nbits;
   mutex_t          lock;
+#ifdef CONFIG_PIC32CZCA90_DMAC
+  DMA_HANDLE       rxdma;
+  DMA_HANDLE       txdma;
+  uint32_t         rxflags;
+  uint32_t         txflags;
+  sem_t            dma_wait;
+  volatile int     dma_result;
+  struct wdog_s    dma_dog;
+#endif
 };
 
 /****************************************************************************
@@ -285,11 +302,120 @@ static uint32_t sam_spi_send(FAR struct spi_dev_s *dev, uint32_t wd)
   return spi_getreg32(base, SAM_SPI_DATA_OFFSET) & 0xFFu;
 }
 
-static void sam_spi_exchange(FAR struct spi_dev_s *dev,
-                             FAR const void *txbuffer,
-                             FAR void *rxbuffer, size_t nwords)
+/****************************************************************************
+ * SPI DMA support
+ ****************************************************************************/
+
+#ifdef CONFIG_PIC32CZCA90_DMAC
+
+static uint32_t g_spi_dummy_tx = 0xFFFFFFFFu;
+static uint32_t g_spi_dummy_rx;
+
+static void spi_rxcallback(DMA_HANDLE handle, void *arg, int result)
 {
-  FAR struct sam_spidev_s *priv = (FAR struct sam_spidev_s *)dev;
+  FAR struct sam_spidev_s *priv = (FAR struct sam_spidev_s *)arg;
+
+  wd_cancel(&priv->dma_dog);
+
+  if (priv->dma_result == -EBUSY)
+    {
+      priv->dma_result = result;
+    }
+
+  nxsem_post(&priv->dma_wait);
+}
+
+static void spi_txcallback(DMA_HANDLE handle, void *arg, int result)
+{
+  FAR struct sam_spidev_s *priv = (FAR struct sam_spidev_s *)arg;
+
+  if (result != OK && priv->dma_result == -EBUSY)
+    {
+      priv->dma_result = result;
+    }
+}
+
+static void spi_dma_timeout(wdparm_t arg)
+{
+  FAR struct sam_spidev_s *priv =
+    (FAR struct sam_spidev_s *)(uintptr_t)arg;
+
+  priv->dma_result = -ETIMEDOUT;
+  nxsem_post(&priv->dma_wait);
+}
+
+static void sam_spi_exchange_dma(FAR struct sam_spidev_s *priv,
+                                 FAR const void *txbuffer,
+                                 FAR void *rxbuffer, size_t nwords)
+{
+  uintptr_t base = priv->base;
+  uint32_t paddr = (uint32_t)(base + SAM_SPI_DATA_OFFSET);
+
+  /* Flush stale RX data */
+
+  while (spi_getreg8(base, SAM_SPI_INTFLAG_OFFSET) & SPI_INT_RXC)
+    {
+      (void)spi_getreg32(base, SAM_SPI_DATA_OFFSET);
+    }
+
+  /* Setup RX DMA */
+
+  if (rxbuffer != NULL)
+    {
+      sam_dmaconfig(priv->rxdma, priv->rxflags);
+      sam_dmarxsetup(priv->rxdma, paddr, (uint32_t)rxbuffer, nwords);
+    }
+  else
+    {
+      sam_dmaconfig(priv->rxdma, priv->rxflags | DMACH_FLAG_NOINC);
+      sam_dmarxsetup(priv->rxdma, paddr, (uint32_t)&g_spi_dummy_rx, nwords);
+    }
+
+  /* Setup TX DMA */
+
+  if (txbuffer != NULL)
+    {
+      sam_dmaconfig(priv->txdma, priv->txflags);
+      sam_dmatxsetup(priv->txdma, paddr, (uint32_t)txbuffer, nwords);
+    }
+  else
+    {
+      sam_dmaconfig(priv->txdma, priv->txflags | DMACH_FLAG_NOINC);
+      sam_dmatxsetup(priv->txdma, paddr, (uint32_t)&g_spi_dummy_tx, nwords);
+    }
+
+  /* Start transfers: RX first (must be ready before TX clocks data in) */
+
+  priv->dma_result = -EBUSY;
+  sam_dmastart(priv->rxdma, spi_rxcallback, priv);
+  sam_dmastart(priv->txdma, spi_txcallback, priv);
+
+  /* Start watchdog */
+
+  wd_start(&priv->dma_dog, SPI_DMA_TIMEOUT,
+            spi_dma_timeout, (wdparm_t)priv);
+
+  /* Wait for RX completion (or timeout) */
+
+  nxsem_wait_uninterruptible(&priv->dma_wait);
+
+  /* Cleanup */
+
+  wd_cancel(&priv->dma_dog);
+  sam_dmastop(priv->rxdma);
+  sam_dmastop(priv->txdma);
+}
+
+#endif /* CONFIG_PIC32CZCA90_DMAC */
+
+/****************************************************************************
+ * Polled SPI exchange (fallback / small transfers)
+ ****************************************************************************/
+
+static void sam_spi_exchange_polled(FAR struct sam_spidev_s *priv,
+                                    FAR const void *txbuffer,
+                                    FAR void *rxbuffer, size_t nwords)
+{
   uintptr_t base = priv->base;
   FAR const uint8_t *tx = (FAR const uint8_t *)txbuffer;
   FAR uint8_t *rx = (FAR uint8_t *)rxbuffer;
@@ -321,6 +447,23 @@ static void sam_spi_exchange(FAR struct spi_dev_s *dev,
   while (!(spi_getreg8(base, SAM_SPI_INTFLAG_OFFSET) & SPI_INT_TXC))
     {
     }
+}
+
+static void sam_spi_exchange(FAR struct spi_dev_s *dev,
+                             FAR const void *txbuffer,
+                             FAR void *rxbuffer, size_t nwords)
+{
+  FAR struct sam_spidev_s *priv = (FAR struct sam_spidev_s *)dev;
+
+#ifdef CONFIG_PIC32CZCA90_DMAC
+  if (priv->rxdma && priv->txdma && nwords > SPI_DMA_THRESHOLD)
+    {
+      sam_spi_exchange_dma(priv, txbuffer, rxbuffer, nwords);
+      return;
+    }
+#endif
+
+  sam_spi_exchange_polled(priv, txbuffer, rxbuffer, nwords);
 }
 
 /****************************************************************************
@@ -389,6 +532,25 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
   priv->actual = SPI3_GCLK_FREQ / (2u * (49u + 1u));  /* 1 MHz */
   priv->mode = SPIDEV_MODE0;
   priv->nbits = 8;
+
+#ifdef CONFIG_PIC32CZCA90_DMAC
+  /* Allocate DMA channels for SPI RX and TX */
+
+  priv->rxflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_RX(SPI3_SERCOM)) |
+                  DMACH_FLAG_PRIORITY(1);
+  priv->txflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_TX(SPI3_SERCOM)) |
+                  DMACH_FLAG_PRIORITY(1);
+
+  priv->rxdma = sam_dmachannel(priv->rxflags);
+  priv->txdma = sam_dmachannel(priv->txflags);
+
+  nxsem_init(&priv->dma_wait, 0, 0);
+
+  spiinfo("SERCOM3 SPI DMA: RX=%p TX=%p (trig RX=%u TX=%u)\n",
+          priv->rxdma, priv->txdma,
+          DMAC_TRIG_SERCOM_RX(SPI3_SERCOM),
+          DMAC_TRIG_SERCOM_TX(SPI3_SERCOM));
+#endif
 
   g_spi3_initialized = true;
 

@@ -5,9 +5,6 @@
  *
  * PIC32CZ CA90 SDMMC (SD/MMC Host Controller) register definitions.
  *
- * All values verified against PIC32CZ8110CA80208_DFP component/sdmmc.h
- * and instance/sdmmc1.h (DFP v1.7.168, file date 2024-10-01).
- *
  * CRITICAL: Use SDMMC1 only. The micro-SD socket on the Curiosity Ultra
  * (EV16W43A) is physically wired to SDMMC1 pins:
  *   PC30=CLK, PG03=CMD, PC31=DAT0, PG00=DAT1, PG01=DAT2, PG02=DAT3, PC28=CD
@@ -51,7 +48,6 @@
 
 /* =========================================================================
  * Register Offsets (from SDMMC base address)
- * All verified from DFP component/sdmmc.h
  * =========================================================================
  */
 
@@ -232,7 +228,7 @@
 
 /* BASECLKF [15:8] — Base Clock Frequency for SD clock, in MHz.
  * Read by sam_set_clock() to compute CCR divider dynamically.
- * If 0, fall back to SDMMC1_BASE_CLOCK_FREQUENCY/2 (Harmony pattern). */
+ * If 0, fall back to SDMMC1_BASE_CLOCK_FREQUENCY/2. */
 #define SDMMC_CA0R_BASECLKF_Pos    8u
 #define SDMMC_CA0R_BASECLKF_Msk    (0xFFu << SDMMC_CA0R_BASECLKF_Pos)
 
@@ -326,7 +322,7 @@
 #define SDMMC_EISTR_ALL         (0x03FFu)
 
 /* =========================================================================
- * Enable masks used during init (mirrors Harmony plib_sdmmc1.c)
+ * Enable masks used during init
  * =========================================================================
  */
 
@@ -358,7 +354,7 @@
  *   bit 1 = END     — last descriptor in table
  *   bit 2 = INT     — interrupt after processing this descriptor
  *   bit 4-5 = ACT  — action: 00=NOP, 01=RSRV, 10=TRAN, 11=LINK
- *   (Harmony uses TRAN=0x20 | VALID=0x01 | END=0x02 | INT=0x04 = 0x27)
+ *   TRAN=0x20 | VALID=0x01 | END=0x02 | INT=0x04 = 0x27
  * =========================================================================
  */
 
@@ -369,7 +365,7 @@
 #define SDMMC_ADMA_ATTR_ACT_TRAN (2u << 4)   /* Transfer data to/from buffer */
 #define SDMMC_ADMA_ATTR_ACT_LINK (3u << 4)   /* Link to another descriptor */
 
-/* Combined attribute for a single-buffer transfer (matches Harmony XFER_DATA | VALID | INTR | END) */
+/* Combined attribute for a single-buffer transfer */
 #define SDMMC_ADMA_XFER_LAST  (SDMMC_ADMA_ATTR_ACT_TRAN | SDMMC_ADMA_ATTR_VALID | \
                                 SDMMC_ADMA_ATTR_INT | SDMMC_ADMA_ATTR_END)
 

@@ -5,9 +5,6 @@
  *
  * PIC32CZ CA90 SQI (Serial Quad Interface) register definitions.
  *
- * All values verified against PIC32CZ8110CA80208_DFP component/sqi.h and
- * instance/sqi1.h (DFP v1.7.168, file date 2024-07-31).
- *
  * Key instance parameters for SQI1:
  *   SAM_SQI1_BASE        = 0x4F009000  (peripheral base address)
  *   SAM_SQI1_GCLK_ID     = 57          (GCLK peripheral channel → GCLK2)
@@ -37,7 +34,6 @@
 
 /* =========================================================================
  * Register Offsets (from SQI base address)
- * All verified from DFP component/sqi.h
  * =========================================================================
  */
 
@@ -152,7 +148,7 @@
 #define SQI_XCON1_DUMMYBYTES(v)     (((v) & 0x7u) << 21)
 
 /* SST26VF032BAT: Regular Read (0x03), 3-byte addr, no dummy, single lane.
- * ADDRBYTES field: value = number of address bytes (DFP-verified).
+ * ADDRBYTES field: value = number of address bytes.
  * Must match the flash's Read command address phase length. */
 #define SQI_XCON1_SST26_READ       (SQI_XCON1_READOPCODE(0x03) | \
                                     SQI_XCON1_ADDRBYTES(3))
@@ -190,15 +186,14 @@
 #define SQI_CFG_LSBF         (1u << 5)   /* LSB First */
 #define SQI_CFG_WP           (1u << 9)   /* WP=1 drives IO2/spiout2 LOW (asserts SST26 WP# = write-protected); keep 0 */
 #define SQI_CFG_HOLD         (1u << 10)  /* HOLD=1 drives IO3/spiout3 LOW (asserts SST26 HOLD# = SCK paused); keep 0 */
-#define SQI_CFG_BURSTEN            (1u << 11)  /* AHB burst enable — bit 11 (DFP-verified; DS is wrong) */
+#define SQI_CFG_BURSTEN            (1u << 11)  /* AHB burst enable */
 #define SQI_CFG_AHB_BURST_INCR4_EN (1u << 12)  /* AHB burst INCR4 enable */
 #define SQI_CFG_AHB_BURST_INCR8_EN (1u << 13)  /* AHB burst INCR8 enable */
 #define SQI_CFG_AHB_BURST_INCR16_EN (1u << 14) /* AHB burst INCR16 enable */
 #define SQI_CFG_RESET        (1u << 16)  /* Reset (HC — cleared by hardware) */
-/* Michigan Ax: TXBUFRST/RXBUFRST/CONBUFRST are Reserved — NEVER write these bits */
-#define SQI_CFG_TXBUFRST     (1u << 17)  /* TX Buffer Reset — NOT for Michigan Ax */
-#define SQI_CFG_RXBUFRST     (1u << 18)  /* RX Buffer Reset — NOT for Michigan Ax */
-#define SQI_CFG_CONBUFRST    (1u << 19)  /* Control Buffer Reset — NOT for Michigan Ax */
+#define SQI_CFG_TXBUFRST     (1u << 17)  /* TX Buffer Reset */
+#define SQI_CFG_RXBUFRST     (1u << 18)  /* RX Buffer Reset */
+#define SQI_CFG_CONBUFRST    (1u << 19)  /* Control Buffer Reset */
 
 /* DATAEN [21:20] — Data lane count */
 #define SQI_CFG_DATAEN_SHIFT 20
@@ -254,8 +249,7 @@
 #define SQI_CLKCON_STABLE        (1u << 1)   /* Clock Stable (RO, poll after EN) */
 
 /* CLKDIV [18:8] — 11-bit clock divider (power-of-2 pre-divider of GCLK input)
- * Value 0x001 = /2, 0x002 = /4, 0x004 = /8 … 0x400 = /2048
- * Harmony uses CLKDIV(1) → 100 MHz GCLK2 / 2 = 50 MHz SCK */
+ * Value 0x001 = /2, 0x002 = /4, 0x004 = /8 … 0x400 = /2048 */
 #define SQI_CLKCON_CLKDIV_SHIFT  8
 #define SQI_CLKCON_CLKDIV_MASK   (0x7FFu << 8)
 #define SQI_CLKCON_CLKDIV(v)     (((v) & 0x7FFu) << 8)
@@ -303,7 +297,7 @@
 #define SQI_INT_PKTCOMP      (1u << 10)  /* Packet complete */
 #define SQI_INT_DMAE         (1u << 11)  /* DMA error */
 
-/* Aliases matching Harmony plib naming */
+/* Convenience aliases */
 #define SQI_INTEN_BDDONEIE    SQI_INT_BDDONE
 #define SQI_INTEN_PKTCOMPIE   SQI_INT_PKTCOMP
 #define SQI_INTSTAT_BDDONEIF  SQI_INT_BDDONE
@@ -379,7 +373,7 @@
 
 /* =========================================================================
  * SQI_MEMSTAT Bits (offset 0x160, R/W 32)
- * Status register check configuration (used by Harmony for SST26 auto-poll).
+ * Status register check configuration (SST26 auto-poll).
  * =========================================================================
  */
 
@@ -413,8 +407,7 @@
  * BD Descriptor Control Word (bd_ctrl field in sqi_dma_desc_t)
  *
  * These bits reside in the bd_ctrl word of the in-memory BD descriptor —
- * NOT in a peripheral register. Verified from DFP component/sqi.h BDCTRL
- * bit-field comments.
+ * NOT in a peripheral register.
  *
  * Typical TX last BD:  DESC_EN | CS_ASSERT | LAST_BD | LIFM | BUFLEN(n)
  * Typical RX last BD:  DESC_EN | CS_ASSERT | LAST_BD | LIFM | DIR | BUFLEN(n)
@@ -448,8 +441,7 @@
 #define SQI_BDCTRL_SPI_DEV_SEL(v)    (((v) & 0x3u) << 28)
 
 #define SQI_BDCTRL_CS_ASSERT      (1u << 30)  /* DEASSERT CS (drive HIGH) for this BD.
-                                                 * DFP name is misleading — 1=CS HIGH, 0=CS LOW.
-                                                 * Confirmed by PORT IN readback during active DMA. */
+                                                 * Despite the name: 1=CS HIGH, 0=CS LOW. */
 #define SQI_BDCTRL_DESC_EN        (1u << 31)  /* Descriptor enabled */
 
 /* =========================================================================
@@ -468,7 +460,7 @@ struct sqi_dma_desc_s
 {
   uint32_t              bd_ctrl;     /* BD control word (SQI_BDCTRL_* bits) */
   uint32_t              bd_stat;     /* BD status (written by hardware) */
-  uint32_t              bd_bufaddr;  /* Physical address of data buffer (uint32_t per Harmony) */
+  uint32_t              bd_bufaddr;  /* Physical address of data buffer */
   struct sqi_dma_desc_s *bd_nxtptr;  /* Pointer to next BD (NULL = end) */
   uint8_t               _pad[16];   /* Pad to 32 bytes for cache alignment */
 };
@@ -476,7 +468,7 @@ struct sqi_dma_desc_s
 typedef struct sqi_dma_desc_s sqi_dma_desc_t;
 
 /* =========================================================================
- * Convenience: Harmony-compatible mode values passed to sam_sqibus_initialize
+ * SPI mode values for sam_sqibus_initialize
  * =========================================================================
  */
 

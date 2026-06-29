@@ -3,7 +3,7 @@
  * arch/arm/src/pic32czca90/hardware/sam_sercom_spi.h
  *
  * PIC32CZ CA90 SERCOM SPI Master registers.
- * Source: PIC32CZ-CA90_DFP/1.7.168 component/sercom.h (SPIM mode)
+ * SERCOM SPI Master mode register definitions.
  *
  ****************************************************************************/
 

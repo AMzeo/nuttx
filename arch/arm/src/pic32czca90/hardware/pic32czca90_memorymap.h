@@ -5,16 +5,8 @@
  *
  * PIC32CZ CA90 Memory Map - DS60001749K Section 8
  *
- * CORRECTED: Previous version had SAMD5x/E5x addresses throughout.
- * All addresses here are verified from DS60001749K Tables 8-1 through 8-11.
- *
- * Key differences from SAMD5x that caused the port to fail:
- *   - CZCA90 has 6 APB buses (A-F) vs 3 on SAMD5x
- *   - Flash starts at 0x0C000000 not 0x00000000
- *   - OSCCTRL is at 0x44040000 not 0x40001000
- *   - GCLK is at 0x44050000 not 0x40001C00
- *   - PORT is at 0x44840000 not 0x41008000
- *   - SERCOM4 is at 0x46004000 not 0x44000000
+ * Addresses from DS60001749K Tables 8-1 through 8-11.
+ * CA90 has 6 APB buses (A-F).
  *
  ****************************************************************************/
 
@@ -117,7 +109,7 @@
 #define SAM_I2S0_BASE           0x46030000
 #define SAM_CAN1_BASE           0x46060000
 #define SAM_CAN2_BASE           0x46062000
-#define SAM_SDHC1_BASE          0x460A0000  /* DFP: SDMMC1_BASE_ADDRESS */
+#define SAM_SDHC1_BASE          0x460A0000  /* SDMMC1 */
 
 /* =========================================================================
  * APB F (0x46800000 – 0x46FFFFFF) – DS60001749K Table 8-10

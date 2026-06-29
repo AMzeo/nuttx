@@ -68,7 +68,7 @@ int sam_portconfig(port_pinset_t pinset)
   func = (pinset >> PORT_FUNC_SHIFT) & 0xf;
 
   /* Configure OUT register.
-   * For output pins: prevents glitch on direction change (Harmony sequence).
+   * For output pins: prevents glitch on direction change.
    * For input pins with PULLEN: OUT=1 → pullup, OUT=0 → pulldown.
    * PORT_FLAG_OUTVAL_HIGH is honoured regardless of whether OUTPUT is set,
    * because pullup-configured peripheral-mux inputs need OUT=1 in OUTSET.

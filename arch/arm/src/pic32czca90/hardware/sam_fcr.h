@@ -4,11 +4,7 @@
  * arch/arm/src/pic32czca90/hardware/sam_fcr.h
  *
  * PIC32CZ CA90 Flash Read Controller (FCR)
- * APB base: 0x44004000  (DFP pic32cz8110ca90208.h FCR_BASE_ADDRESS)
- *
- * Register offsets and bit fields verified from:
- *   PIC32CZ-CA90_DFP/1.7.168/CA90/include/component/fcr.h
- *   PIC32CZ-CA90_DFP/1.7.168/CA90/include/instance/fcr.h
+ * APB base: 0x44004000
  *
  * FCR controls flash read timing (wait states) and ECC.
  * Flash writes use FCW (sam_fcw.h), not FCR.
@@ -17,9 +13,9 @@
  *   Set FCR_CTRLA.AUTOWS=1 to let hardware manage wait states, OR
  *   set FCR_CTRLA.FWS to the correct value for the CPU clock:
  *     At 300 MHz, PFM access time = 25 ns → ceil(25 / 3.33) = 8 wait states.
- *   Harmony example uses AUTOWS=1 (field AUTOWS at bit 15).
+ *   AUTOWS=1 recommended (field AUTOWS at bit 15).
  *
- * MCLK IDs (DFP instance/fcr.h):
+ * MCLK IDs:
  *   FCR_MCLK_ID_AHB = 4   → CLKMSK[0] bit 4
  *   FCR_MCLK_ID_APB = 5   → CLKMSK[0] bit 5
  *
@@ -31,7 +27,7 @@
 #include "hardware/sam_memorymap.h"
 
 /* =========================================================================
- * Register Offsets — DFP component/fcr.h verified
+ * Register Offsets
  * =========================================================================
  */
 
@@ -100,7 +96,6 @@
 
 /* =========================================================================
  * MCLK IDs — enable clocks before any FCR register access
- * (DFP instance/fcr.h FCR_MCLK_ID_AHB / FCR_MCLK_ID_APB)
  * Formula: CLKMSK[id/32] |= (1 << (id % 32))
  * =========================================================================
  */

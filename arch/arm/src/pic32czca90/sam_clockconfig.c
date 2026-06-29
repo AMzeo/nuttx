@@ -17,10 +17,10 @@
  *   OSCULP32K → GCLK3 (SRC=3, DIV=1) → 32.768 kHz (SERCOM slow, WDT)
  *
  * Note: MCLK.CLKDIV[0] (offset 0x000C) = CPU Clock Divider; BOARD_MCLK_CPUDIV=1
- * → no division → CPU = GCLK0 = PLL0 = 300 MHz (cross-test verified).
- * MCLK.CLKDIV[1] (offset 0x0010) is a separate domain divider; set to 2 matching
- * Harmony GCLK0_Initialize.  The CKRDY read is a clock-domain barrier before the
- * GCLK0 source switch to PLL0 — skipping it causes early boot hang.
+ * → no division → CPU = GCLK0 = PLL0 = 300 MHz.
+ * MCLK.CLKDIV[1] (offset 0x0010) is a separate domain divider; set to 2.
+ * The CKRDY poll is a clock-domain barrier before the GCLK0 source switch
+ * to PLL0 — skipping it causes early boot hang.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -396,7 +396,7 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
    * The BootROM may already have set this; we set it explicitly so our
    * boot path is independent of BootROM behavior.
    *
-   * Harmony reference: CLOCK_Initialize() → FCR_Initialize() sets AUTOWS.
+   * FCR_Initialize() equivalent: set AUTOWS before increasing clock.
    */
 
   {
@@ -443,21 +443,20 @@ void sam_clock_configure(const struct sam_clockconfig_s *config)
 
   /* 6. Write MCLK.CLKDIV[1] and poll CKRDY before switching GCLK0 to PLL0.
    *
-   *    DFP: MCLK_CLKDIV[0] (0x0C) = CPU divider — READ-ONLY / PAC write-protected.
+   *    MCLK_CLKDIV[0] (0x0C) = CPU divider — READ-ONLY / PAC write-protected.
    *         Writing to 0x4405200C causes a bus fault. DO NOT touch it.
    *         CPU stays at reset default CPUDIV=1 → CPU = GCLK0 = PLL0 = 300 MHz.
    *
-   *    DFP: MCLK_CLKDIV[1] (0x10) = secondary domain divider — writable.
-   *         Set to 2, matching Harmony GCLK0_Initialize (plib_clock.c for CA80).
-   *         The CKRDY poll after this write provides the clock-domain barrier
-   *         before the GCLK0 source switch in step 7.
+   *    MCLK_CLKDIV[1] (0x10) = secondary domain divider — writable.
+   *         Set to 2. The CKRDY poll after this write provides the clock-domain
+   *         barrier before the GCLK0 source switch in step 7.
    *         Skipping this sequence causes an early boot hang.
    */
 
   /* CLKDIV[0] at 0x0C (CPU divider) is read-only / PAC write-protected.
    * Writing to it causes a bus fault — do NOT touch it.
    * CPU stays at reset default CPUDIV=1 → CPU = GCLK0 = 300 MHz. */
-  putreg32(2u, SAM_MCLK_CLKDIV1);  /* CLKDIV[1]=0x10: match Harmony; provides CKRDY barrier */
+  putreg32(2u, SAM_MCLK_CLKDIV1);  /* CLKDIV[1]=0x10: provides CKRDY barrier */
 
   while ((getreg32(SAM_MCLK_INTFLAG) & MCLK_INTFLAG_CKRDY) == 0)
     {

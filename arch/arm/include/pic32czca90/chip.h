@@ -47,7 +47,7 @@
 #define PIC32CZCA90_NTC             0              /* No TC (basic timer) — CA90 uses TCC for all timers */
 #define PIC32CZCA90_NTCC            10             /* TCC0-TCC9 */
 #define PIC32CZCA90_NCAN            6              /* CAN0-5 (MCAN) */
-#define PIC32CZCA90_NDMACHAN        32             /* 32 DMA channels */
+#define PIC32CZCA90_NDMACHAN        16             /* 16 DMA channels (DFP DMA_CHANNEL_NUMBER) */
 #define PIC32CZCA90_NADC0CHAN       16             /* ADC0 channels */
 #define PIC32CZCA90_NADC1CHAN       16             /* ADC1 channels */
 #define PIC32CZCA90_NACMP           4              /* Analog comparators */

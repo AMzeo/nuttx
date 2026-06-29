@@ -3,7 +3,7 @@
  * arch/arm/src/pic32czca90/hardware/sam_eic.h
  *
  * PIC32CZ CA90 External Interrupt Controller (EIC) registers.
- * Source: PIC32CZ-CA90_DFP/1.7.168 component/eic.h + instance/eic.h
+ * External Interrupt Controller register definitions.
  *
  ****************************************************************************/
 
@@ -14,7 +14,9 @@
  * EIC Base Address, GCLK, MCLK
  ****************************************************************************/
 
+#ifndef SAM_EIC_BASE
 #define SAM_EIC_BASE              0x44800000u
+#endif
 #define EIC_GCLK_ID              5
 #define EIC_MCLK_ID_APB          16
 #define EIC_NEXTINT              16

@@ -4,24 +4,18 @@
  * arch/arm/src/pic32czca90/hardware/sam_fcw.h
  *
  * PIC32CZ CA90 Flash Write Controller (FCW)
- * APB base: 0x44002000  (DFP pic32cz8110ca90208.h FCW_BASE_ADDRESS)
+ * APB base: 0x44002000
  *
- * Register offsets and bit fields verified from:
- *   PIC32CZ-CA90_DFP/1.7.168/CA90/include/component/fcw.h
- *   PIC32CZ-CA90_DFP/1.7.168/CA90/include/instance/fcw.h
- *   Harmony plib_fcw.c (flash_read_write example, pic32cz_ca80_curiosity_ultra)
+ * NOTE: CA90 uses FCW for flash writes, NOT NVMCTRL.
  *
- * NOTE: CA90 uses FCW for flash writes, NOT NVMCTRL (which is a SAMD5x
- *       peripheral). sam_nvmctrl.h is a stale stub — do NOT use it.
- *
- * Flash geometry (DFP + Harmony):
+ * Flash geometry:
  *   PFM bus address:  0x0C000000  (8 MB, 2 panels of 4 MB)
  *   BFM bus address:  0x08000000  (128 KB)
  *   Page size:        4096 bytes  (erase unit)
  *   Row size:         1024 bytes  (ROW_PROGRAM write unit)
  *   Write at < row:   64-bit or 256-bit doubleword writes
  *
- * MCLK IDs (DFP instance/fcw.h):
+ * MCLK IDs:
  *   FCW_MCLK_ID_AHB = 2   → CLKMSK[0] bit 2
  *   FCW_MCLK_ID_APB = 3   → CLKMSK[0] bit 3
  *
@@ -33,7 +27,7 @@
 #include "hardware/sam_memorymap.h"
 
 /* =========================================================================
- * Register Offsets — DFP component/fcw.h verified
+ * Register Offsets
  * =========================================================================
  */
 
@@ -144,7 +138,7 @@
  * The key is consumed on the next register write — do NOT insert any
  * other register access between KEY write and CTRLA write.
  *
- * From Harmony plib_fcw.c (DFP-generated):
+ * Key values:
  * =========================================================================
  */
 
@@ -160,7 +154,7 @@
 #define FCW_SWAP_PFSWAP             (1u << 0)   /* 0=Panel 1 active, 1=Panel 2 active */
 
 /* =========================================================================
- * Flash Geometry Constants (DFP instance/fcw.h + Harmony plib_fcw.h)
+ * Flash Geometry Constants
  * =========================================================================
  */
 
@@ -173,7 +167,6 @@
 
 /* =========================================================================
  * MCLK IDs — enable clocks before any FCW register access
- * (DFP instance/fcw.h FCW_MCLK_ID_AHB / FCW_MCLK_ID_APB)
  * Formula: CLKMSK[id/32] |= (1 << (id % 32))
  * =========================================================================
  */

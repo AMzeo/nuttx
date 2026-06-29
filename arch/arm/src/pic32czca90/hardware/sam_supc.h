@@ -6,12 +6,8 @@
  * PIC32CZ CA90 Supply Controller (SUPC)
  * Base: SAM_SUPC_BASE
  *
- * Register offsets verified from PIC32CZ8110CA80208_DFP/component/supc.h
- *
- * Key difference from previous version:
- *   VREGCTRL is at offset 0x1C (not 0x18).
- *   Offset 0x18 is LVD (Low-Voltage Detect), not VREG.
- *   VREGCTRL.AVREGEN[18:16] must be set to 4 before enabling PLL0.
+ * VREGCTRL is at offset 0x1C (not 0x18 — that is LVD).
+ * VREGCTRL.AVREGEN[18:16] must be set to 4 before enabling PLL0.
  *
  ****************************************************************************/
 
@@ -21,7 +17,7 @@
 #include "hardware/sam_memorymap.h"
 
 /* =========================================================================
- * Register Offsets – DFP verified
+ * Register Offsets
  * =========================================================================
  */
 
@@ -51,21 +47,22 @@
  * STATUS Register Bits (offset 0x000C, 32-bit)
  *
  * ADDVREGRDY[10:8]: indicates which additional voltage regulator is ready.
- * Harmony waits for: (4u << 8) = bit 10 when AVREGEN=4 is requested.
+ * Wait for bit 10 when AVREGEN=4 is requested.
  * =========================================================================
  */
 
 #define SUPC_STATUS_BOD33RDY        (1u << 0)
 #define SUPC_STATUS_BOD33DET        (1u << 1)
-#define SUPC_STATUS_VREGRDY         (1u << 8)   /* Main regulator ready      */
-#define SUPC_STATUS_ADDVREGRDY_POS  8           /* ADDVREGRDY field position */
-#define SUPC_STATUS_ADDVREGRDY2     (4u << SUPC_STATUS_ADDVREGRDY_POS) /* bit 10 */
+#define SUPC_STATUS_ADDVREGRDY0     (1u << 8)   /* Additional reg 0 ready    */
+#define SUPC_STATUS_ADDVREGRDY1     (1u << 9)   /* Additional reg 1 ready    */
+#define SUPC_STATUS_ADDVREGRDY2     (1u << 10)  /* Additional reg 2 ready    */
+#define SUPC_STATUS_ADDVREGRDY_ALL  (7u << 8)   /* All 3 regulators ready    */
 
 /* =========================================================================
  * VREGCTRL Register Bits (offset 0x001C, 32-bit)
  *
  * AVREGEN[18:16]: Additional Voltage Regulator Enable
- *   Harmony sets AVREGEN=4 before enabling PLL0.
+ *   Set AVREGEN=4 before enabling PLL0.
  *   This selects/enables the additional voltage regulator needed for PLL.
  * =========================================================================
  */

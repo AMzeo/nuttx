@@ -6,8 +6,6 @@
  * PIC32CZ CA90 Main Clock (MCLK)
  * Base: 0x44052000
  *
- * Register layout from PIC32CZ8110CA80208_DFP/component/mclk.h
- *
  * Peripheral APB clock enable: CLKMSK[id/32] |= (1 << (id%32))
  *
  ****************************************************************************/
@@ -18,7 +16,7 @@
 #include "hardware/sam_memorymap.h"
 
 /* =========================================================================
- * Register Offsets – DFP verified
+ * Register Offsets
  * =========================================================================
  */
 
@@ -27,8 +25,8 @@
 #define SAM_MCLK_INTFLAG_OFFSET     0x0008  /* Interrupt Flag (8-bit)         */
 /* 0x000B: reserved */
 #define SAM_MCLK_CLKDIV_OFFSET(n)  (0x000C + (n) * 4)  /* Clock Divider n (32-bit) */
-/* CLKDIV[0]=0x000C, CLKDIV[1]=0x0010 — uint32_t[2] stride 4 bytes (DFP mclk_registers_t) */
-/* 0x0014-0x003B: reserved (DFP struct Reserved1[0x28]) */
+/* CLKDIV[0]=0x000C, CLKDIV[1]=0x0010 — uint32_t[2] stride 4 bytes */
+/* 0x0014-0x003B: reserved */
 #define SAM_MCLK_CLKMSK_OFFSET(n)  (0x003C + (n) * 4)  /* Clock Mask n (32-bit) */
 /* CLKMSK[0]=0x003C .. CLKMSK[8]=0x005C */
 
@@ -45,13 +43,8 @@
 
 /* Convenience aliases
  *
- * DFP (PIC32CZ8110CA80208_DFP component/mclk.h) register names:
- *   MCLK_CLKDIV[0]  offset 0x0C  CPU Clock Division Factor
+ *   MCLK_CLKDIV[0]  offset 0x0C  CPU Clock Division Factor (PAC-protected)
  *   MCLK_CLKDIV[1]  offset 0x10  Second clock domain divider
- *                                  (Harmony GCLK0_Initialize sets this to 2)
- *
- * Cross-test confirmed: CPU = 300 MHz = GCLK0 / CLKDIV[0](=1)
- * CLKDIV[1]=2 has no effect on CPU frequency.
  */
 
 #define SAM_MCLK_CLKDIV0            SAM_MCLK_CLKDIV(0)
@@ -74,7 +67,6 @@
 /* =========================================================================
  * Peripheral APB clock enable via CLKMSK[]
  *
- * MCLK_ID_APB values from PIC32CZ8110CA80208 DFP instance files.
  * Formula: enable = CLKMSK[id/32] |= (1 << (id%32))
  * =========================================================================
  */
@@ -90,7 +82,7 @@
 #define MCLK_ID_APB_SERCOM8         39u  /* CLKMSK[1] bit  7 */
 #define MCLK_ID_APB_SERCOM9         40u  /* CLKMSK[1] bit  8 */
 
-/* TCC APB clock IDs — DFP instance/tcc*.h TCC*_MCLK_ID_APB (verified) */
+/* TCC APB clock IDs */
 
 #define MCLK_ID_APB_TCC0            41u  /* CLKMSK[1] bit  9 */
 #define MCLK_ID_APB_TCC1            42u  /* CLKMSK[1] bit 10 */
@@ -103,7 +95,7 @@
 #define MCLK_ID_APB_TCC8            49u  /* CLKMSK[1] bit 17 */
 #define MCLK_ID_APB_TCC9            50u  /* CLKMSK[1] bit 18 */
 
-/* Low-numbered APB/AHB clock IDs — DFP instance files (CLKMSK[0])
+/* Low-numbered APB/AHB clock IDs (CLKMSK[0])
  *
  * DSU:  APB=1, AHB=0  — enable before accessing DSU_DID (MCU serial number)
  * FCW:  AHB=2, APB=3  — enable before any flash write/erase
@@ -122,24 +114,11 @@
 #define SAM_MCLK_CLKMSK_ADDR(id)    SAM_MCLK_CLKMSK((uint32_t)(id) / 32u)
 #define SAM_MCLK_CLKMSK_BIT(id)     (1u << ((uint32_t)(id) % 32u))
 
-/* MCLK CLKDIV — hardware-verified register map (DS70005522C §21.6 vs DFP discrepancy):
+/* MCLK CLKDIV register map:
  *
- *   Offset  DS70005522C §21.6      DFP MCLK_CLKDIV[n]  Hardware result
- *   ------  ---------------------  ------------------  ---------------------------
- *   0x0C    CLKDIV0 (CPU div, R)   [0]                 Reads 1 (reset=no division).
- *                                                      WRITE = BusFault (PAC protected).
- *                                                      CPU = GCLK0 / 1 = 300 MHz always.
- *   0x10    Reserved               [1]                 Readable + writable.
- *                                                      Harmony GCLK0_Initialize writes 2.
- *   0x14    CLKDIV1 (domain, R/W)  (not mapped)        BUS STALL on read — hardware-confirmed.
- *                                                      DO NOT ACCESS. DS map is wrong here.
- *
- * Conclusion: DFP stride-4 array definition matches hardware.
- *             DS §21.6 is erroneous — register at 0x14 is not accessible on CA90.
- *             Harmony GCLK0_Initialize: writes MCLK_CLKDIV[1]=2 (→ 0x10) then polls
- *             CKRDY. The CKRDY poll is the clock-domain barrier before GCLK0 switches
- *             to PLL0. The write to 0x10 is harmless; skipping the CKRDY poll causes
- *             an early boot hang.
+ *   0x0C  CLKDIV[0]  CPU divider. Reads 1 (no division). PAC-protected — write = BusFault.
+ *   0x10  CLKDIV[1]  Domain divider. Writable. Set to 2 then poll CKRDY before GCLK0 switch.
+ *   0x14  (not accessible on CA90 — bus stall on read. DS §21.6 map is erroneous here.)
  *
  * SAM_MCLK_CPUDIV is intentionally NOT defined — CLKDIV[0] must never be written. */
 

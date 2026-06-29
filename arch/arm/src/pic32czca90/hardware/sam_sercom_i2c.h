@@ -3,7 +3,7 @@
  * arch/arm/src/pic32czca90/hardware/sam_sercom_i2c.h
  *
  * PIC32CZ CA90 SERCOM I2C Master registers.
- * Source: PIC32CZ-CA90_DFP/1.7.168 component/sercom.h (I2CM mode)
+ * SERCOM I2C Master mode register definitions.
  *
  ****************************************************************************/
 
@@ -86,7 +86,7 @@
 #define I2C_INT_TXFE              (1u << 3)   /* TX FIFO Empty */
 #define I2C_INT_RXFF              (1u << 4)   /* RX FIFO Full */
 #define I2C_INT_ERROR             (1u << 7)   /* Error */
-#define I2C_INT_ALL               0x9Bu       /* All INTFLAG bits (DFP mask) */
+#define I2C_INT_ALL               0x9Bu       /* All INTFLAG bits */
 
 /****************************************************************************
  * STATUS (offset 0x1A, R/W 16-bit)
