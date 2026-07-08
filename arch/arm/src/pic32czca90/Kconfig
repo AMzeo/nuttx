@@ -10,6 +10,7 @@ menu "PIC32CZ CA90 Peripheral Support"
 config PIC32CZCA90_SERCOM
 	bool
 	default n
+	select ARCH_HAVE_SERIAL_TERMIOS
 
 config PIC32CZCA90_TCC
 	bool

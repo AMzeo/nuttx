@@ -14,9 +14,7 @@
  * EIC Base Address, GCLK, MCLK
  ****************************************************************************/
 
-#ifndef SAM_EIC_BASE
-#define SAM_EIC_BASE              0x44800000u
-#endif
+#include "hardware/pic32czca90_memorymap.h"
 #define EIC_GCLK_ID              5
 #define EIC_MCLK_ID_APB          16
 #define EIC_NEXTINT              16

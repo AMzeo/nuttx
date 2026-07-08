@@ -97,23 +97,28 @@
 
 /* =========================================================================
  * XOSCCTRLA Register Bits (offset 0x0014, 32-bit)
+ * DFP: PIC32CZ8110CA80208, mask = 0x830F0FBE
  * =========================================================================
  */
 
 #define OSCCTRL_XOSCCTRL_ENABLE          (1u << 1)
-#define OSCCTRL_XOSCCTRL_XTALEN          (1u << 2) /* 0=ext clock, 1=crystal */
-#define OSCCTRL_XOSCCTRL_CFDEN           (1u << 3)
-#define OSCCTRL_XOSCCTRL_SWBEN           (1u << 4)
-#define OSCCTRL_XOSCCTRL_RUNSTDBY        (1u << 6)
+#define OSCCTRL_XOSCCTRL_AGC             (1u << 2)
+#define OSCCTRL_XOSCCTRL_XTALEN          (1u << 3)  /* 0=ext clock, 1=crystal */
+#define OSCCTRL_XOSCCTRL_CFDEN           (1u << 4)
+#define OSCCTRL_XOSCCTRL_SWBEN           (1u << 5)
 #define OSCCTRL_XOSCCTRL_ONDEMAND        (1u << 7)
-#define OSCCTRL_XOSCCTRL_LOWBUFGAIN      (1u << 8)
-#define OSCCTRL_XOSCCTRL_IPTAT_SHIFT     9
-#define OSCCTRL_XOSCCTRL_IPTAT_MASK      (0x3u << OSCCTRL_XOSCCTRL_IPTAT_SHIFT)
-#define OSCCTRL_XOSCCTRL_IMULT_SHIFT     11
-#define OSCCTRL_XOSCCTRL_IMULT_MASK      (0xfu << OSCCTRL_XOSCCTRL_IMULT_SHIFT)
-#define OSCCTRL_XOSCCTRL_ENALC           (1u << 15)
-#define OSCCTRL_XOSCCTRL_STARTUP_SHIFT   20
+#define OSCCTRL_XOSCCTRL_STARTUP_SHIFT   8
 #define OSCCTRL_XOSCCTRL_STARTUP_MASK    (0xfu << OSCCTRL_XOSCCTRL_STARTUP_SHIFT)
+#define OSCCTRL_XOSCCTRL_CFDPRESC_SHIFT  16
+#define OSCCTRL_XOSCCTRL_CFDPRESC_MASK   (0xfu << OSCCTRL_XOSCCTRL_CFDPRESC_SHIFT)
+#define OSCCTRL_XOSCCTRL_USBHSDIV_SHIFT  24
+#define OSCCTRL_XOSCCTRL_USBHSDIV_MASK   (0x3u << OSCCTRL_XOSCCTRL_USBHSDIV_SHIFT)
+#define OSCCTRL_XOSCCTRL_USBHSDIV(v)     (((uint32_t)(v) << OSCCTRL_XOSCCTRL_USBHSDIV_SHIFT) & OSCCTRL_XOSCCTRL_USBHSDIV_MASK)
+#define OSCCTRL_XOSCCTRL_USBHSDIV_DIS    OSCCTRL_XOSCCTRL_USBHSDIV(0)
+#define OSCCTRL_XOSCCTRL_USBHSDIV_DIV1   OSCCTRL_XOSCCTRL_USBHSDIV(1)
+#define OSCCTRL_XOSCCTRL_USBHSDIV_DIV2   OSCCTRL_XOSCCTRL_USBHSDIV(2)
+#define OSCCTRL_XOSCCTRL_USBHSDIV_DIV4   OSCCTRL_XOSCCTRL_USBHSDIV(3)
+#define OSCCTRL_XOSCCTRL_LOWBUFGAIN      (1u << 31)
 
 /* =========================================================================
  * DFLL48M Register Bits

@@ -71,4 +71,14 @@
 #define SUPC_VREGCTRL_AVREGEN_MASK   (0x7u << SUPC_VREGCTRL_AVREGEN_SHIFT)
 #  define SUPC_VREGCTRL_AVREGEN(v)   ((uint32_t)(v) << SUPC_VREGCTRL_AVREGEN_SHIFT)
 
+/* Individual AVREGEN bits within the 3-bit field at [18:16]:
+ *   Bit 16 (AVREGEN[0]) = USBHS0 PHY regulator
+ *   Bit 17 (AVREGEN[1]) = USBHS1 PHY regulator
+ *   Bit 18 (AVREGEN[2]) = PLL additional regulator
+ */
+
+#define SUPC_VREGCTRL_AVREGEN_USBHS0  (1u << 16)
+#define SUPC_VREGCTRL_AVREGEN_USBHS1  (1u << 17)
+#define SUPC_VREGCTRL_AVREGEN_PLL     (1u << 18)
+
 #endif /* __ARCH_ARM_SRC_PIC32CZCA90_HARDWARE_SAM_SUPC_H */

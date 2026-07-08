@@ -30,19 +30,18 @@ struct sam_xosc32_config_s
   uint8_t rtcsel;
 };
 
-/* XOSC0 configuration (CA90 has one external oscillator: XOSCCTRLA) */
+/* XOSC0 configuration (CA90 has one external oscillator: XOSCCTRLA)
+ * DFP-verified fields only: ENABLE, XTALEN, ONDEMAND, CFDEN, SWBEN, STARTUP
+ */
 
 struct sam_xosc_config_s
 {
   uint8_t enable     : 1;
-  uint8_t extalen    : 1;   /* 0=ext clock, 1=crystal */
-  uint8_t runstdby   : 1;
-  uint8_t ondemand   : 1;
-  uint8_t lowgain    : 1;
-  uint8_t enalc      : 1;
-  uint8_t cfden      : 1;
-  uint8_t swben      : 1;
-  uint8_t startup;
+  uint8_t extalen    : 1;   /* 0=ext clock, 1=crystal (bit 3) */
+  uint8_t ondemand   : 1;   /* bit 7 */
+  uint8_t cfden      : 1;   /* Clock failure detect (bit 4) */
+  uint8_t swben      : 1;   /* Switch back enable (bit 5) */
+  uint8_t startup;          /* Startup delay [11:8], 0-15 */
   uint32_t xosc_frequency;
 };
 

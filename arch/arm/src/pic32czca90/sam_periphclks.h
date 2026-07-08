@@ -100,10 +100,13 @@
 
 #define sam_port_enableperiph()      sam_apbb_enableperiph(MCLK_APBBMASK_PORT)
 
-/* USB clock enable */
+/* USB clock enable — USBHS on CA90 does not have an MCLK gate.
+ * Clock is enabled via SUPC VREGCTRL + XOSC USBHSDIV. These are
+ * no-ops retained for API compatibility with shared NuttX USB code.
+ */
 
-#define sam_usb_enableperiph()       sam_apbb_enableperiph(MCLK_APBBMASK_USB)
-#define sam_usb_disableperiph()      sam_apbb_disableperiph(MCLK_APBBMASK_USB)
+#define sam_usb_enableperiph()       do { } while (0)
+#define sam_usb_disableperiph()      do { } while (0)
 
 /* GMAC (Ethernet) clock enable */
 

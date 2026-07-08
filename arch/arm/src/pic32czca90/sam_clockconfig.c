@@ -76,11 +76,9 @@ static const struct sam_clockconfig_s g_initial_clocking =
     {
       .enable         = BOARD_XOSC0_ENABLE,
       .extalen        = BOARD_XOSC0_XTALEN,
-      .runstdby       = BOARD_XOSC0_RUNSTDBY,
       .ondemand       = BOARD_XOSC0_ONDEMAND,
-      .lowgain        = BOARD_XOSC0_LOWGAIN,
-      .enalc          = BOARD_XOSC0_ENALC,
       .cfden          = BOARD_XOSC0_CFDEN,
+      .swben          = BOARD_XOSC0_SWBEN,
       .startup        = BOARD_XOSC0_STARTUP,
       .xosc_frequency = BOARD_XOSC0_FREQUENCY,
     },
@@ -232,14 +230,20 @@ static void sam_xosc32k_configure(const struct sam_xosc32_config_s *config)
 static void sam_xosc_configure(const struct sam_xosc_config_s *config)
 {
   uint32_t regval;
-  uintptr_t regaddr;
 
   if (!config->enable)
     {
       return;
     }
 
-  regaddr = SAM_OSCCTRL_XOSCCTRL(0);
+  /* CA90 XOSCCTRLA layout (DFP-verified):
+   *   ENABLE[1], AGC[2], XTALEN[3], CFDEN[4], SWBEN[5],
+   *   ONDEMAND[7], STARTUP[11:8], CFDPRESC[19:16], USBHSDIV[25:24]
+   *
+   * The board has a 12 MHz MEMS oscillator (DSC6011JI2B) connected as
+   * an external clock input (XTALEN=0). USBHSDIV provides a divided
+   * reference clock to the USBHS PHY PLL.
+   */
 
   regval = 0;
 
@@ -248,24 +252,9 @@ static void sam_xosc_configure(const struct sam_xosc_config_s *config)
       regval |= OSCCTRL_XOSCCTRL_XTALEN;
     }
 
-  if (config->runstdby)
-    {
-      regval |= OSCCTRL_XOSCCTRL_RUNSTDBY;
-    }
-
   if (config->ondemand)
     {
       regval |= OSCCTRL_XOSCCTRL_ONDEMAND;
-    }
-
-  if (config->lowgain)
-    {
-      regval |= OSCCTRL_XOSCCTRL_LOWBUFGAIN;
-    }
-
-  if (config->enalc)
-    {
-      regval |= OSCCTRL_XOSCCTRL_ENALC;
     }
 
   if (config->cfden)
@@ -273,36 +262,32 @@ static void sam_xosc_configure(const struct sam_xosc_config_s *config)
       regval |= OSCCTRL_XOSCCTRL_CFDEN;
     }
 
-  regval |= (config->startup << OSCCTRL_XOSCCTRL_STARTUP_SHIFT);
+  regval |= ((uint32_t)config->startup << OSCCTRL_XOSCCTRL_STARTUP_SHIFT) &
+             OSCCTRL_XOSCCTRL_STARTUP_MASK;
 
-  if (config->xosc_frequency <= 8000000)
-    {
-      regval |= (3 << OSCCTRL_XOSCCTRL_IMULT_SHIFT);
-      regval |= (2 << OSCCTRL_XOSCCTRL_IPTAT_SHIFT);
-    }
-  else if (config->xosc_frequency <= 16000000)
-    {
-      regval |= (4 << OSCCTRL_XOSCCTRL_IMULT_SHIFT);
-      regval |= (3 << OSCCTRL_XOSCCTRL_IPTAT_SHIFT);
-    }
-  else if (config->xosc_frequency <= 24000000)
-    {
-      regval |= (5 << OSCCTRL_XOSCCTRL_IMULT_SHIFT);
-      regval |= (3 << OSCCTRL_XOSCCTRL_IPTAT_SHIFT);
-    }
-  else
-    {
-      regval |= (6 << OSCCTRL_XOSCCTRL_IMULT_SHIFT);
-      regval |= (3 << OSCCTRL_XOSCCTRL_IPTAT_SHIFT);
-    }
+#ifdef BOARD_XOSC0_USBHSDIV
+  regval |= OSCCTRL_XOSCCTRL_USBHSDIV(BOARD_XOSC0_USBHSDIV);
+#endif
 
   regval |= OSCCTRL_XOSCCTRL_ENABLE;
-  putreg32(regval, regaddr);
+  putreg32(regval, SAM_OSCCTRL_XOSCCTRLA);
 
   while ((getreg32(SAM_OSCCTRL_STATUS) &
           OSCCTRL_STATUS_XOSCRDY0) == 0)
     {
     }
+
+#ifdef BOARD_XOSC0_USBHSDIV
+  /* Enable USBHS0 PHY voltage regulator after XOSC is stable */
+
+  uint32_t supc = getreg32(SAM_SUPC_VREGCTRL);
+  supc |= SUPC_VREGCTRL_AVREGEN_USBHS0;
+  putreg32(supc, SAM_SUPC_VREGCTRL);
+
+  while ((getreg32(SAM_SUPC_STATUS) & SUPC_STATUS_ADDVREGRDY0) == 0)
+    {
+    }
+#endif
 }
 #endif /* BOARD_HAVE_XOSC0 */
 
@@ -325,11 +310,10 @@ static void sam_pll0_init(void)
 {
   uint32_t regval;
 
-  /* 1. Enable additional voltage regulator (SUPC.VREGCTRL.AVREGEN=4) */
+  /* 1. Enable PLL additional voltage regulator (bit 18) — preserve USBHS0 bit 16 */
 
   regval  = getreg32(SAM_SUPC_VREGCTRL);
-  regval &= ~SUPC_VREGCTRL_AVREGEN_MASK;
-  regval |= SUPC_VREGCTRL_AVREGEN(4);
+  regval |= SUPC_VREGCTRL_AVREGEN_PLL;
   putreg32(regval, SAM_SUPC_VREGCTRL);
 
   while ((getreg32(SAM_SUPC_STATUS) & SUPC_STATUS_ADDVREGRDY2) == 0)
