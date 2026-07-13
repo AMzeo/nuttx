@@ -29,7 +29,6 @@
 
 #include <nuttx/config.h>
 
-#include <stdio.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -45,6 +44,7 @@
 #include <nuttx/can/can.h>
 
 #include "arm_internal.h"
+#include "barriers.h"
 #include "hardware/sam_matrix.h"
 #include "hardware/sam_chipid.h"
 #include "hardware/sam_pinmap.h"
@@ -1092,7 +1092,7 @@ static struct can_dev_s g_mcan0dev;
 
 static uint32_t g_mcan1_msgram[MCAN1_MSGRAM_WORDS]
 #ifdef CONFIG_ARMV7M_DCACHE
-  __attribute__((aligned(MCAN_ALIGN)));
+  __attribute__((aligned(MCAN_ALIGN), section(".nocache")));
 #else
   ;
 #endif
@@ -2512,6 +2512,7 @@ static int mcan_setup(struct can_dev_s *dev)
 
   up_enable_irq(config->irq0);
   up_enable_irq(config->irq1);
+
   mcan_dev_unlock(priv);
   return OK;
 }
@@ -2635,7 +2636,7 @@ static void mcan_txint(struct can_dev_s *dev, bool enable)
 
   caninfo("MCAN%d enable: %d\n", priv->config->port, enable);
 
-  /* Enable/disable the receive interrupts */
+  /* Enable/disable the TX interrupts */
 
   flags = enter_critical_section();
   regval = mcan_getreg(priv, SAM_MCAN_IE_OFFSET);
@@ -3018,6 +3019,15 @@ static int mcan_send(struct can_dev_s *dev, struct can_msg_s *msg)
    * the MCAN device was opened O_NONBLOCK.
    */
 
+  /* DEBUG: Print register state before TX attempt */
+  {
+    uint32_t cccr_dbg = mcan_getreg(priv, SAM_MCAN_CCCR_OFFSET);
+    uint32_t txfqs_dbg = mcan_getreg(priv, SAM_MCAN_TXFQS_OFFSET);
+    uint32_t psr_dbg = mcan_getreg(priv, SAM_MCAN_PSR_OFFSET);
+    syslog(LOG_ERR, "MCAN TX: CCCR=0x%08x TXFQS=0x%08x PSR=0x%08x\n",
+           cccr_dbg, txfqs_dbg, psr_dbg);
+  }
+
   sched_lock();
   mcan_buffer_reserve(priv);
 
@@ -3114,15 +3124,14 @@ static int mcan_send(struct can_dev_s *dev, struct can_msg_s *msg)
 
   msglen = 2 * sizeof(uint32_t) + nbytes;
   up_clean_dcache((uintptr_t)txbuffer, (uintptr_t)txbuffer + msglen);
+  ARM_DSB();
   UNUSED(msglen);
 
-  /* Enable transmit interrupts from the TX FIFOQ buffer by setting TC
-   * interrupt bit in IR (also requires that the TC interrupt is enabled)
-   */
+  /* Enable transmit completion interrupts for all buffers */
 
-  mcan_putreg(priv, SAM_MCAN_TXBTIE_OFFSET, (1 << ndx));
+  mcan_putreg(priv, SAM_MCAN_TXBTIE_OFFSET, 0xffffffff);
 
-  /* And request to send the packet */
+  /* Request transmission */
 
   mcan_putreg(priv, SAM_MCAN_TXBAR_OFFSET, (1 << ndx));
   mcan_dev_unlock(priv);
@@ -3633,6 +3642,7 @@ static int mcan_interrupt(int irq, void *context, void *arg)
       pending = (ir & ie);
       handled = false;
 
+
       /* Check for any errors */
 
       if ((pending & MCAN_ANYERR_INTS) != 0)
@@ -3677,6 +3687,9 @@ static int mcan_interrupt(int irq, void *context, void *arg)
                   ie &= ~(MCAN_INT_PEA | MCAN_INT_PED);
                 }
 
+              /* Never disable TC/TFE - required for TX FIFO flow control */
+
+              ie |= (MCAN_INT_TC | MCAN_INT_TFE);
               mcan_putreg(priv, SAM_MCAN_IE_OFFSET, ie);
 
               /* Clear the error indications */
@@ -3713,6 +3726,7 @@ static int mcan_interrupt(int irq, void *context, void *arg)
                */
 
               ie &= ~(pending & MCAN_RXERR_INTS);
+              ie |= (MCAN_INT_TC | MCAN_INT_TFE);
               mcan_putreg(priv, SAM_MCAN_IE_OFFSET, ie);
 
               /* Clear the error indications */
@@ -3732,10 +3746,7 @@ static int mcan_interrupt(int irq, void *context, void *arg)
 
       if ((pending & MCAN_INT_TC) != 0)
         {
-          /* Check if we have disabled the ACKE in the error-handling above
-           * (see MCAN_TXERR_INTS) to prevent Interrupt-Flooding and
-           * re-enable the error interrupt here again.
-           */
+          /* Re-enable error interrupts if previously disabled */
 
           if ((priv->rev == 0) && ((ie & MCAN_INT_ACKE) == 0))
             {
@@ -3755,27 +3766,63 @@ static int mcan_interrupt(int irq, void *context, void *arg)
 
           mcan_putreg(priv, SAM_MCAN_IR_OFFSET, priv->txints);
 
-          /* Indicate that there is one more buffer free in the TX FIFOQ by
-           * "releasing" it.  This may have the effect of waking up a thread
-           * that has been waiting for a free TX FIFOQ buffer.
-           *
-           * REVISIT: TX dedicated buffers are not supported.
+          /* Release one buffer per completed transmission. Multiple frames
+           * may complete between interrupt entries, so release based on
+           * actual free level vs semaphore count.
            */
 
-          mcan_buffer_release(priv);
+          {
+            uint32_t txfqs = mcan_getreg(priv, SAM_MCAN_TXFQS_OFFSET);
+            int tffl = (txfqs & MCAN_TXFQS_TFFL_MASK) >> MCAN_TXFQS_TFFL_SHIFT;
+            int sval;
+
+            nxsem_get_value(&priv->txfsem, &sval);
+
+            while (sval < tffl && sval < priv->config->ntxfifoq)
+              {
+                nxsem_post(&priv->txfsem);
+                sval++;
+              }
+          }
+
           handled = true;
 
 #ifdef CONFIG_CAN_TXREADY
-          /* Inform the upper half driver that we are again ready to accept
-           * data in mcan_send().
+          can_txready(dev);
+#endif
+        }
+      if ((pending & MCAN_INT_TFE) != 0)
+        {
+          /* TX FIFO Empty — all pending transmissions complete.
+           * Sync semaphore to actual HW free level.
            */
 
+          mcan_putreg(priv, SAM_MCAN_IR_OFFSET, MCAN_INT_TFE);
+
+          {
+            uint32_t txfqs = mcan_getreg(priv, SAM_MCAN_TXFQS_OFFSET);
+            int tffl = (txfqs & MCAN_TXFQS_TFFL_MASK) >>
+                       MCAN_TXFQS_TFFL_SHIFT;
+            int sval;
+
+            nxsem_get_value(&priv->txfsem, &sval);
+
+            while (sval < tffl && sval < priv->config->ntxfifoq)
+              {
+                nxsem_post(&priv->txfsem);
+                sval++;
+              }
+          }
+
+          handled = true;
+
+#ifdef CONFIG_CAN_TXREADY
           can_txready(dev);
 #endif
         }
       else if ((pending & priv->txints) != 0)
         {
-          /* Clear unhandled TX events */
+          /* Clear remaining unhandled TX events */
 
           mcan_putreg(priv, SAM_MCAN_IR_OFFSET, priv->txints);
           handled = true;
@@ -3969,21 +4016,15 @@ static int mcan_hw_initialize(struct sam_mcan_s *priv)
 
   sam_enableperiph1(config->pid);
 
-  /* Enable the Initialization state */
+  /* Force INIT state and wait */
 
-  regval  = mcan_getreg(priv, SAM_MCAN_CCCR_OFFSET);
-  regval |= MCAN_CCCR_INIT;
-  mcan_putreg(priv, SAM_MCAN_CCCR_OFFSET, regval);
-
-  /* Wait for initialization mode to take effect */
+  mcan_putreg(priv, SAM_MCAN_CCCR_OFFSET, MCAN_CCCR_INIT);
 
   while ((mcan_getreg(priv, SAM_MCAN_CCCR_OFFSET) & MCAN_CCCR_INIT) == 0);
 
   /* Enable writing to configuration registers */
 
-  regval  = mcan_getreg(priv, SAM_MCAN_CCCR_OFFSET);
-  regval |= (MCAN_CCCR_INIT | MCAN_CCCR_CCE);
-  mcan_putreg(priv, SAM_MCAN_CCCR_OFFSET, regval);
+  mcan_putreg(priv, SAM_MCAN_CCCR_OFFSET, MCAN_CCCR_INIT | MCAN_CCCR_CCE);
 
   /* Global Filter Configuration:
    *
@@ -4032,7 +4073,17 @@ static int mcan_hw_initialize(struct sam_mcan_s *priv)
     }
   else
     {
+#ifdef CONFIG_ARCH_CHIP_PIC32CZCA70
+      /* PIC32CZ CA70: Use Harmony-verified NBTP for 500 kbps @ 150 MHz
+       * NTSEG2=74, NTSEG1=223, NBRP=0, NSJW=74
+       * Total TQ=300, sample point=75%
+       */
+
+      mcan_putreg(priv, SAM_MCAN_NBTP_OFFSET,
+                  (74u << 0) | (223u << 8) | (0u << 16) | (74u << 25));
+#else
       mcan_putreg(priv, SAM_MCAN_NBTP_OFFSET, priv->btp);
+#endif
       mcan_putreg(priv, SAM_MCAN_DBTP_OFFSET, priv->fbtp);
     }
 
@@ -4244,11 +4295,23 @@ static int mcan_hw_initialize(struct sam_mcan_s *priv)
 
   mcan_putreg(priv, SAM_MCAN_ILE_OFFSET, MCAN_ILE_EINT0);
 
-  /* Disable initialization mode to enable normal operation */
+  /* Disable initialization mode to enable normal operation.
+   * Clear both INIT and CCE. Wait for INIT=0 confirming bus integration
+   * started (matches Harmony driver — without this, TX may never succeed).
+   */
 
   regval  = mcan_getreg(priv, SAM_MCAN_CCCR_OFFSET);
-  regval &= ~MCAN_CCCR_INIT;
+  regval &= ~(MCAN_CCCR_INIT | MCAN_CCCR_CCE);
   mcan_putreg(priv, SAM_MCAN_CCCR_OFFSET, regval);
+
+  while ((mcan_getreg(priv, SAM_MCAN_CCCR_OFFSET) & MCAN_CCCR_INIT) != 0);
+
+  syslog(LOG_ERR, "[MCAN] hw_init DONE: CCCR=0x%08x TXFQS=0x%08x PSR=0x%08x TXBC=0x%08x\n",
+         (unsigned)mcan_getreg(priv, SAM_MCAN_CCCR_OFFSET),
+         (unsigned)mcan_getreg(priv, SAM_MCAN_TXFQS_OFFSET),
+         (unsigned)mcan_getreg(priv, SAM_MCAN_PSR_OFFSET),
+         (unsigned)mcan_getreg(priv, SAM_MCAN_TXBC_OFFSET));
+
   return OK;
 }
 
@@ -4280,17 +4343,24 @@ struct can_dev_s *sam_mcan_initialize(int port)
 
   caninfo("MCAN%d\n", port);
 
-  /* Select PCK5 clock source and pre-scaler value.  Both MCAN controllers
-   * use PCK5 to derive bit rate.
+  /* Configure PCK5 clock for MCAN bit rate timing.
+   * Must disable first, configure, enable, then wait for ready.
+   * (Matches Microchip Harmony driver sequence.)
    */
+
+  putreg32(PMC_PCK5, SAM_PMC_SCDR);  /* Disable PCK5 first */
 
   regval = PMC_PCK_PRES(CONFIG_SAMV7_MCAN_CLKSRC_PRESCALER - 1) |
            SAMV7_MCAN_CLKSRC;
-  putreg32(regval, SAM_PMC_PCK5);
+  putreg32(regval, SAM_PMC_PCK5);     /* Configure source and prescaler */
 
-  /* Enable PCK5 */
+  putreg32(PMC_PCK5, SAM_PMC_SCER);  /* Enable PCK5 */
 
-  putreg32(PMC_PCK5, SAM_PMC_SCER);
+  /* Wait for PCK5 to be ready - critical! Without this, MCAN has no
+   * bit-rate clock and cannot exit INIT mode.
+   */
+
+  while ((getreg32(SAM_PMC_SR) & PMC_INT_PCKRDY5) == 0);
 
   /* Select MCAN peripheral to be initialized */
 
@@ -4322,12 +4392,13 @@ struct can_dev_s *sam_mcan_initialize(int port)
       priv   = &g_mcan1priv;
       config = &g_mcan1const;
 
-      /* Configure MCAN1 Message RAM Base Address */
+      /* Configure MCAN1 Message RAM Base Address.
+       * Clear all CCFG_SYSIO bits (Harmony does this) then set DMA base.
+       * Lower bits control PB system I/O — clearing them is safe as NuttX
+       * uses PIO mode for all PB pins.
+       */
 
-      regval  = getreg32(SAM_MATRIX_CCFG_SYSIO);
-      regval &= ~MATRIX_CCFG_CAN1DMABA_MASK;
-      regval |= (uint32_t)config->msgram.stdfilters &
-                MATRIX_CCFG_CAN1DMABA_MASK;
+      regval = (uint32_t)config->msgram.stdfilters & MATRIX_CCFG_CAN1DMABA_MASK;
       putreg32(regval, SAM_MATRIX_CCFG_SYSIO);
     }
   else
@@ -4346,10 +4417,17 @@ struct can_dev_s *sam_mcan_initialize(int port)
       memset(priv, 0, sizeof(struct sam_mcan_s));
       priv->config = config;
 
-      /* Get the revision of the chip (A or B ) */
+      /* Get the revision of the chip (A or B).
+       * PIC32CZ CA70 reports chip version 0 (rev A silicon) but has
+       * MCAN Rev B IP (uses NBTP/DBTP registers, not BTP/FBTP).
+       */
 
       regval = getreg32(SAM_CHIPID_CIDR);
+#ifdef CONFIG_ARCH_CHIP_PIC32CZCA70
+      priv->rev = 1;  /* PIC32CZ CA70 always uses MCAN Rev B layout */
+#else
       priv->rev = regval & CHIPID_CIDR_VERSION_MASK;
+#endif
 
       /* Set the initial bit timing.  This might change subsequently
        * due to IOCTL command processing.
