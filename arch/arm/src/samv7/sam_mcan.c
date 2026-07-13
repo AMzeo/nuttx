@@ -4073,17 +4073,7 @@ static int mcan_hw_initialize(struct sam_mcan_s *priv)
     }
   else
     {
-#ifdef CONFIG_ARCH_CHIP_PIC32CZCA70
-      /* PIC32CZ CA70: Use Harmony-verified NBTP for 500 kbps @ 150 MHz
-       * NTSEG2=74, NTSEG1=223, NBRP=0, NSJW=74
-       * Total TQ=300, sample point=75%
-       */
-
-      mcan_putreg(priv, SAM_MCAN_NBTP_OFFSET,
-                  (74u << 0) | (223u << 8) | (0u << 16) | (74u << 25));
-#else
       mcan_putreg(priv, SAM_MCAN_NBTP_OFFSET, priv->btp);
-#endif
       mcan_putreg(priv, SAM_MCAN_DBTP_OFFSET, priv->fbtp);
     }
 
@@ -4423,8 +4413,8 @@ struct can_dev_s *sam_mcan_initialize(int port)
        */
 
       regval = getreg32(SAM_CHIPID_CIDR);
-#ifdef CONFIG_ARCH_CHIP_PIC32CZCA70
-      priv->rev = 1;  /* PIC32CZ CA70 always uses MCAN Rev B layout */
+#if defined(CONFIG_ARCH_CHIP_PIC32CZCA70) || defined(CONFIG_ARCH_CHIP_SAMV71)
+      priv->rev = 1;  /* PIC32CZ CA70 / SAMV71 uses MCAN Rev B layout */
 #else
       priv->rev = regval & CHIPID_CIDR_VERSION_MASK;
 #endif
