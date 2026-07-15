@@ -671,7 +671,7 @@ static struct
 
   uint8_t rx1buffer[DUMMY_NBUFFERS * DUMMY_BUFSIZE]
           aligned_data(EMAC_ALIGN);
-} g_emac0_mem;
+} g_emac0_mem __attribute__((section(".nocache")));
 
 #endif
 
@@ -798,7 +798,8 @@ static const struct sam_emacattr_s g_emac0_attr =
  * a full packet.
  */
 
-static uint8_t g_pktbuf0[MAX_NETDEV_PKTSIZE + CONFIG_NET_GUARDSIZE];
+static uint8_t g_pktbuf0[MAX_NETDEV_PKTSIZE + CONFIG_NET_GUARDSIZE]
+               __attribute__((section(".nocache"), aligned(32)));
 
 /* EMAC0 peripheral state */
 
@@ -896,7 +897,11 @@ static struct sam_emac_s g_emac1;
  * EMAC peripherals.
  */
 
-static uint8_t g_emac_nqueues = EMAC_NQUEUES_REVA; /* Assume Rev A */
+/* PIC32CZ CA70 reports chip version 0 (Rev A) but has 6 GMAC queues.
+ * All queues MUST be initialized with valid descriptors or the GMAC DMA
+ * will HRESP when accessing uninitialized queue base pointers.
+ * Force 6 queues regardless of chip revision (same as Harmony). */
+static uint8_t g_emac_nqueues = EMAC_NQUEUES_REVB;
 
 /****************************************************************************
  * Private Functions
