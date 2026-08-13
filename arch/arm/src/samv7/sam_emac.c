@@ -2652,8 +2652,26 @@ static int sam_ifup(struct net_driver_s *dev)
       return ret;
     }
 
-  while (sam_linkup(priv) == 0);
-  ninfo("Link detected\n");
+  /* Wait for link with timeout — do not block forever if no cable */
+  {
+    int linktimeout;
+    for (linktimeout = 0; linktimeout < 5000; linktimeout++)
+      {
+        if (sam_linkup(priv) != 0)
+          {
+            break;
+          }
+        up_mdelay(1);
+      }
+    if (linktimeout >= 5000)
+      {
+        nwarn("WARNING: No Ethernet link detected, continuing anyway\n");
+      }
+    else
+      {
+        ninfo("Link detected\n");
+      }
+  }
 
   /* Enable normal MAC operation */
 
