@@ -339,7 +339,7 @@ static inline FAR struct cmsghdr *__cmsg_nxthdr(FAR void *__ctl,
 {
   FAR struct cmsghdr *__ptr;
 
-  __ptr = (FAR struct cmsghdr *)
+  __ptr = (FAR struct cmsghdr *)(FAR void *)
     (((FAR char *)__cmsg) + CMSG_ALIGN(__cmsg->cmsg_len));
   if ((unsigned long)((FAR char *)(__ptr + 1) - (FAR char *)__ctl) > __size)
     {
