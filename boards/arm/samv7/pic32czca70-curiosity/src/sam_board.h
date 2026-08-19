@@ -156,10 +156,13 @@
  *   ------ ----------
  */
 
+/* Custom CA70 board: PD10=Red (panic), PC17=Blue (normal/boot)
+ * LED_STACKCREATED drives GPIO_LED1 (PC17=Blue) solid ON at boot.
+ * LED_PANIC drives GPIO_LED0 (PD10=Red) blinking on crash. */
 #define GPIO_LED0     (GPIO_OUTPUT | GPIO_CFG_DEFAULT | GPIO_OUTPUT_SET | \
-                       GPIO_PORT_PIOD | GPIO_PIN29)
+                       GPIO_PORT_PIOD | GPIO_PIN10)
 #define GPIO_LED1     (GPIO_OUTPUT | GPIO_CFG_DEFAULT | GPIO_OUTPUT_SET | \
-                       GPIO_PORT_PIOD | GPIO_PIN23)
+                       GPIO_PORT_PIOC | GPIO_PIN17)
 
 /* Buttons
  *
