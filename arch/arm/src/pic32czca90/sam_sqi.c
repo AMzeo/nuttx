@@ -115,6 +115,7 @@ static void     sqi_exchange(FAR struct spi_dev_s *dev,
                               FAR const void *txbuffer,
                               FAR void *rxbuffer, size_t nwords);
 static void     sqi_full_reset(void);
+static void     sqi_rxbuf_invalidate(size_t nbytes);
 
 /****************************************************************************
  * Private Data
@@ -140,6 +141,11 @@ static struct sam_sqi_dev_s g_sqi1_dev =
   .mode      = SPIDEV_MODE0,
   .cs_active = false,
 };
+
+/* Tracks whether SQI is currently in XIP (memory-mapped read) mode.
+ * APB register reads while XIP+SQIEN are active stall the bus — never
+ * access SQI control registers without first checking this flag. */
+static volatile bool g_sqi_xip_active;
 
 /* TX DMA descriptor and buffer — nocache for DMA coherency */
 
@@ -460,6 +466,7 @@ static void sqi_exchange(FAR struct spi_dev_s *dev,
           sqi_putreg(SAM_SQI_INTSTAT_OFFSET,
                      sqi_getreg(SAM_SQI_INTSTAT_OFFSET));
 
+          sqi_rxbuf_invalidate(rx_count);
           rx[0] = g_sqi_rx_buf[rx_count - 1];
         }
     }
@@ -529,6 +536,7 @@ static void sqi_exchange(FAR struct spi_dev_s *dev,
                      sqi_getreg(SAM_SQI_INTSTAT_OFFSET));
           priv->pending_tx_len = 0;
 
+          sqi_rxbuf_invalidate(rxlen);
           for (i = 0; i < rxlen; i++)
             {
               rx[i] = g_sqi_rx_buf[i];
@@ -552,12 +560,33 @@ static void sqi_exchange(FAR struct spi_dev_s *dev,
               return;
             }
 
+          sqi_rxbuf_invalidate(rxlen);
           for (i = 0; i < rxlen; i++)
             {
               rx[i] = g_sqi_rx_buf[i];
             }
         }
     }
+}
+
+/* g_sqi_rx_buf is written by the SQI BD-DMA engine, not the CPU. The
+ * D-cache does not see those writes (write-through only covers CPU
+ * stores) so any cached line over this buffer must be invalidated
+ * before the CPU reads it back. sam_sqi_flash_cmd_read() already does
+ * this; sqi_exchange() below did not. */
+
+static void sqi_rxbuf_invalidate(size_t nbytes)
+{
+  uintptr_t addr;
+
+  for (addr = (uintptr_t)g_sqi_rx_buf & ~31u;
+       addr < (uintptr_t)g_sqi_rx_buf + nbytes;
+       addr += 32)
+    {
+      putreg32(addr, 0xE000EF5Cu);  /* DCIMVAC */
+    }
+
+  __asm__ volatile ("dsb sy" ::: "memory");
 }
 
 static uint32_t sqi_send(FAR struct spi_dev_s *dev, uint32_t wd)
@@ -856,12 +885,24 @@ void sam_sqi_xip_enable(void)
   sqi_putreg(SAM_SQI_XCON2_OFFSET, SQI_XCON2_SST26_CS0);
   sqi_modreg(SAM_SQI_CFG_OFFSET, SQI_CFG_MODE_MASK, SQI_CFG_MODE_XIP);
   priv->xip_configured = true;
+  g_sqi_xip_active = true;
 }
 
 void sam_sqi_enter_xip(void)
 {
-  uint32_t cfg = sqi_getreg(SAM_SQI_CFG_OFFSET);
-  irqstate_t flags = enter_critical_section();
+  uint32_t cfg;
+  irqstate_t flags;
+
+  /* If already in XIP mode, APB register access would stall the bus.
+   * Skip reconfiguration entirely — the controller is already set up. */
+
+  if (g_sqi_xip_active)
+    {
+      return;
+    }
+
+  cfg = sqi_getreg(SAM_SQI_CFG_OFFSET);
+  flags = enter_critical_section();
 
   /* 1. Stop DMA, clear any pending state */
 
@@ -918,6 +959,8 @@ void sam_sqi_enter_xip(void)
              SQI_CFG_DATAEN(0) | SQI_CFG_CSEN0 | SQI_CFG_SQIEN);
 
   __asm__ volatile ("dsb sy\n isb sy" ::: "memory");
+
+  g_sqi_xip_active = true;
 
   leave_critical_section(flags);
 }
@@ -998,8 +1041,7 @@ int sam_sqi_flash_cmd_write(FAR const uint8_t *txbuf, size_t txlen)
   sqi_putreg(SAM_SQI_BDCON_OFFSET, SQI_BDCON_START | SQI_BDCON_DMAEN);
 
   timeout = SQI_DMA_TIMEOUT;
-  while (!(sqi_getreg(SAM_SQI_INTSTAT_OFFSET) &
-           (SQI_INT_BDDONE | SQI_INT_PKTCOMP)))
+  while (!(sqi_getreg(SAM_SQI_INTSTAT_OFFSET) & SQI_INT_PKTCOMP))
     {
       if (--timeout == 0)
         {
@@ -1008,19 +1050,52 @@ int sam_sqi_flash_cmd_write(FAR const uint8_t *txbuf, size_t txlen)
         }
     }
 
+  /* PKTCOMP fires when the BD DMA finishes loading bytes into the TX FIFO,
+   * NOT when the last bit is shifted out.  We need STAT1.TXBUFFREE == 256
+   * (full FIFO capacity free), which means the shift register has also
+   * completed and the last bit has left the pin.
+   *
+   * TXEMPTY fires when the TX FIFO count reaches zero — i.e., the last byte
+   * has moved from the FIFO into the shift register but the 8 SCK clocks
+   * have NOT finished yet.  The next call after this function is
+   * sqi_full_reset() → SWRST, which aborts an in-progress SCK burst.
+   *
+   * Wait for STAT1.TXBUFFREE to equal the full TX FIFO capacity (256 words),
+   * which means the shift register has also completed and the last bit is out.
+   * STAT1[31:16] = number of TX buffer entries currently free. */
+
+  timeout = SQI_DMA_TIMEOUT;
+  while (((sqi_getreg(SAM_SQI_STAT1_OFFSET) >> 16) & 0xFFFFu) < 256u)
+    {
+      if (--timeout == 0)
+        {
+          break;  /* non-fatal: last bit may still have gone out */
+        }
+    }
+
   sqi_putreg(SAM_SQI_BDCON_OFFSET, 0);
   sqi_putreg(SAM_SQI_INTSTAT_OFFSET, sqi_getreg(SAM_SQI_INTSTAT_OFFSET));
   return 0;
 }
 
+/* DIAGNOSTIC: counts every time a wait in sqi_full_reset() actually hits
+ * its timeout instead of the condition asserting normally. Nonzero here
+ * on the failing board (and zero/near-zero on a working board) would
+ * confirm a board-dependent clock/reset timing margin, not a logic bug --
+ * exactly consistent with "same firmware, 1 of 3 boards fails". */
+uint32_t g_sqi_swrst_timeouts;
+uint32_t g_sqi_clkstable_timeouts;
+
 static void sqi_full_reset(void)
 {
   volatile uint32_t t;
 
+  g_sqi_xip_active = false;
+
   putreg8(SQI_CTRLA_SWRST, SAM_SQI1_CTRLA);
   t = 100000u;
   while (getreg8(SAM_SQI1_SYNCBUSY) & SQI_SYNCBUSY_SWRST)
-    { if (--t == 0) break; }
+    { if (--t == 0) { g_sqi_swrst_timeouts++; break; } }
 
   /* Clear XIP registers — they persist through SWRST and can interfere
    * with DMA mode if sam_sqi_enter_xip() was previously called. */
@@ -1037,14 +1112,14 @@ static void sqi_full_reset(void)
   {
     volatile uint32_t t = 100000u;
     while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
-      { if (--t == 0) break; }
+      { if (--t == 0) { g_sqi_clkstable_timeouts++; break; } }
   }
   sqi_putreg(SAM_SQI_CLKCON_OFFSET,
              SQI_CLKCON_EN | SQI_CLKCON_CLKDIV(SQI1_CLKDIV_50MHZ));
   {
     volatile uint32_t t = 100000u;
     while (!(sqi_getreg(SAM_SQI_CLKCON_OFFSET) & SQI_CLKCON_STABLE))
-      { if (--t == 0) break; }
+      { if (--t == 0) { g_sqi_clkstable_timeouts++; break; } }
   }
   sqi_modreg(SAM_SQI_CFG_OFFSET, 0, SQI_CFG_SQIEN);
   sqi_putreg(SAM_SQI_CMDTHR_OFFSET,

@@ -3,7 +3,7 @@
 /****************************************************************************
  * arch/arm/src/pic32czca90/sam_sdmmc.c
  *
- * PIC32CZ CA90 SDMMC1 driver.
+ * PIC32CZ CA90 SDMMC0 driver.
  *
  * The SDMMC IP in CA90 (variant sdmmc_44002) is SD Host Controller Spec 2.0
  * compatible. Adapted from SAMA5 sam_sdmmc.c (same IP, identical register
@@ -16,7 +16,7 @@
  *     as fallback — replaces SAMA5 prescaler+divisor.
  *
  *  3. DMA: ADMA2 (descriptor at SAM_SDMMC_ASAR_OFFSET @0x58) when
- *     CONFIG_PIC32CZCA90_SDMMC1_DMA=y. PIO (interrupt-driven) is the
+ *     CONFIG_PIC32CZCA90_SDMMC0_DMA=y. PIO (interrupt-driven) is the
  *     fallback path — toggle via Kconfig for DMA debugging.
  *
  * Combined 32-bit interrupt register access:
@@ -26,20 +26,46 @@
  *   view (error bits shifted left by 16). Same applies to NISTER/EISTER (0x34)
  *   and NISIER/EISIER (0x38).
  *
- * Pin mux: SDMMC1 uses mux I (function code 8).
- *   PC30=CLK, PG03=CMD, PC31=DAT0, PG00=DAT1, PG01=DAT2, PG02=DAT3, PC28=CD
- *
- * IMPORTANT: SDMMC1 shares these pins with SQI1 (mux H = 7). Only one
- * peripheral may own the pins at a time. See init.c for the mux strategy.
- *
- * Reference: arch/arm/src/sama5/sam_sdmmc.c (same SDMMC IP)
  ****************************************************************************/
+
+/* Set to 1 to treat DATCRC errors as success so the mmcsd layer sees the
+ * received data.  If the SD card mounts correctly despite CRC errors, the
+ * data path is working and only the CRC check is broken.  If the mount
+ * still fails, the received data itself is corrupt (DAT line issue).
+ * Remove after diagnosis is complete. */
+#define SDMMC0_DEBUG_BYPASS_DATCRC  0
+
+/* SDMMC1 diagnostic: set to 1 to drive the on-board SD socket (SDMMC1,
+ * PC30/PG00-03) instead of EXT-header wires (SDMMC0, PC08-PC15).
+ * Isolates CA90 SDMMC IP 4-bit behaviour from EXT-header wiring.
+ * Requires CONFIG_PIC32CZCA90_SQI1 disabled (shared pins).
+ * Revert to 0 after the test. */
+#define SDMMC_TEST_USE_SDMMC1  0
+
+#if SDMMC_TEST_USE_SDMMC1
+#  define SAM_SDMMC_BASE          SAM_SDMMC1_BASE
+#  define SAM_SDMMC_GCLK_ID       SAM_SDMMC1_GCLK_ID
+#  define SAM_SDMMC_GCLK_ID_SLOW  SAM_SDMMC1_GCLK_ID_SLOW
+#  define SAM_SDMMC_MCLK_ID_AHB   SAM_SDMMC1_MCLK_ID_AHB
+#  define SAM_SDMMC_MCLK_ID_APB   SAM_SDMMC1_MCLK_ID_APB
+#  define SAM_SDMMC_IRQ            SAM_IRQ_SDMMC1
+#  define PORT_SDMMC_CD            PORT_SDMMC1_CD
+#else
+#  define SAM_SDMMC_BASE          SAM_SDMMC0_BASE
+#  define SAM_SDMMC_GCLK_ID       SAM_SDMMC0_GCLK_ID
+#  define SAM_SDMMC_GCLK_ID_SLOW  SAM_SDMMC0_GCLK_ID_SLOW
+#  define SAM_SDMMC_MCLK_ID_AHB   SAM_SDMMC0_MCLK_ID_AHB
+#  define SAM_SDMMC_MCLK_ID_APB   SAM_SDMMC0_MCLK_ID_APB
+#  define SAM_SDMMC_IRQ            SAM_IRQ_SDMMC0
+#  define PORT_SDMMC_CD            PORT_SDMMC0_CD
+#endif
 
 #include <nuttx/config.h>
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1
+#ifdef CONFIG_PIC32CZCA90_SDMMC0
 
 #include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -105,8 +131,10 @@
 #define SDMMC_INT_AC12E    (SDMMC_EISTR_ACMD   << 16)   /* bit 24 — Auto CMD12 */
 #define SDMMC_INT_ADMAE    (SDMMC_EISTR_ADMA   << 16)   /* bit 25 — ADMA Error */
 
-/* Combined mask: all normal + all error bits */
-#define SDMMC_INT_ALL  (0x000001ffu | ((uint32_t)SDMMC_EISTR_ALL << 16))
+/* Combined mask: all normal + ERRINT (bit15) + all error bits.
+ * NISTER[15]=ERRINT must be enabled; without it NISTR[15] stays 0
+ * (DFP: SDMMC_NISTER_ERRINT_Pos=15). */
+#define SDMMC_INT_ALL  (0x000081ffu | ((uint32_t)SDMMC_EISTR_ALL << 16))
 
 /****************************************************************************
  * HC1R (Host Control 1) bit aliases in 32-bit view at HC1R_OFFSET (0x28).
@@ -150,12 +178,13 @@
  * CA0R (Capabilities 0) voltage bits.
  ****************************************************************************/
 
-#define SDMMC_CA0_VS33      (1u << 24)
-#define SDMMC_CA0_VS30      (1u << 25)
-#define SDMMC_CA0_VS18      (1u << 26)
-#define SDMMC_CA0_DDR50     (1u << 2)
-#define SDMMC_CA0_SDR50     (1u << 0)
-#define SDMMC_CA0_SDR104    (1u << 1)
+/* CA0R voltage support bits (DFP sdmmc.h V33VSUP/V30VSUP/V18VSUP, bits[26:24]) */
+#define SDMMC_CA0_VS33      (1u << 24)   /* 3.3V support */
+#define SDMMC_CA0_VS30      (1u << 25)   /* 3.0V support */
+#define SDMMC_CA0_VS18      (1u << 26)   /* 1.8V support */
+/* DDR50/SDR50/SDR104 capability bits are in CA1R bits[2:0], not CA0R.
+ * CA0R bits[6:0] = timeout clock frequency (TEOCLKF) — never test for UHS here.
+ * UHS mode is set only after CMD11 + 1.8V signaling switch. */
 
 /****************************************************************************
  * HC2R (Host Control 2) UHS mode bits.
@@ -193,7 +222,7 @@
  * Bus speed constants.
  ****************************************************************************/
 
-#define SDMMC1_BUS_HIGH_SPEED_THRESHOLD   26000000u
+#define SDMMC0_BUS_HIGH_SPEED_THRESHOLD   26000000u
 
 /****************************************************************************
  * Timeout and TCR constants.
@@ -272,9 +301,10 @@ struct sam_dev_s
   size_t remaining;
   uint32_t xfrints;
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
   volatile uint8_t xfrflags;
   uint32_t *bufferend;
+  uint32_t pending_asar;  /* descriptor address to write to ASAR at CMD issue time */
 #endif
 
   uint32_t cintints;
@@ -288,6 +318,9 @@ struct sam_dev_s
   bool cmd_error;  /* true if sam_waitresponse detected a command error */
   uint32_t last_tmr_cr;  /* last TMR+CR value written (retry/debug) */
   uint32_t last_arg;     /* last ARG1R value written (retry) */
+  uint32_t last_eistr;   /* EISTR value captured at last data error */
+  uint32_t last_nistr;   /* NISTR value captured at last ISR entry */
+  uint32_t last_psr_err; /* PSR captured at data error (before SW reset) */
 };
 
 
@@ -295,7 +328,7 @@ struct sam_dev_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static void sam_takesem(struct sam_dev_s *priv);
+/* sam_takesem not used in spin-poll diagnostic mode */
 #define     sam_givesem(priv) (nxsem_post(&priv->waitsem))
 static void sam_configwaitints(struct sam_dev_s *priv, uint32_t waitints,
               sdio_eventset_t waitevents, sdio_eventset_t wkupevents);
@@ -304,7 +337,7 @@ static void sam_configxfrints(struct sam_dev_s *priv, uint32_t xfrints);
 static void sam_dataconfig(struct sam_dev_s *priv, bool bwrite,
               unsigned int datalen, unsigned int timeout);
 
-#ifndef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifndef CONFIG_PIC32CZCA90_SDMMC0_DMA
 static void sam_transmit(struct sam_dev_s *priv);
 static void sam_receive(struct sam_dev_s *priv);
 #endif
@@ -328,7 +361,7 @@ static int  sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg);
 static void sam_blocksetup(struct sdio_dev_s *dev,
               unsigned int blocklen, unsigned int nblocks);
 #endif
-#ifndef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifndef CONFIG_PIC32CZCA90_SDMMC0_DMA
 static int  sam_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
               size_t nbytes);
 static int  sam_sendsetup(struct sdio_dev_s *dev,
@@ -349,7 +382,7 @@ static void sam_callbackenable(struct sdio_dev_s *dev,
               sdio_eventset_t eventset);
 static int  sam_registercallback(struct sdio_dev_s *dev,
               worker_t callback, void *arg);
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
 static int  sam_dmarecvsetup(struct sdio_dev_s *dev,
               uint8_t *buffer, size_t buflen);
 static int  sam_dmasendsetup(struct sdio_dev_s *dev,
@@ -369,7 +402,7 @@ void sdio_mediachange(struct sdio_dev_s *dev, bool cardinslot);
 
 struct sam_dev_s g_sdmmcdev =
 {
-  .addr = SAM_SDMMC1_BASE,
+  .addr = SAM_SDMMC_BASE,
   .dev  =
   {
     .reset            = sam_reset,
@@ -382,7 +415,7 @@ struct sam_dev_s g_sdmmcdev =
 #ifdef CONFIG_SDIO_BLOCKSETUP
     .blocksetup       = sam_blocksetup,
 #endif
-#ifndef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifndef CONFIG_PIC32CZCA90_SDMMC0_DMA
     .recvsetup        = sam_recvsetup,
     .sendsetup        = sam_sendsetup,
 #else
@@ -403,7 +436,7 @@ struct sam_dev_s g_sdmmcdev =
     .callbackenable   = sam_callbackenable,
     .registercallback = sam_registercallback,
 #ifdef CONFIG_SDIO_DMA
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
     .dmarecvsetup     = sam_dmarecvsetup,
     .dmasendsetup     = sam_dmasendsetup,
 #else
@@ -416,7 +449,7 @@ struct sam_dev_s g_sdmmcdev =
 
 /* ADMA2 descriptor in nocache region (one descriptor handles ≤65535 bytes) */
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
 static sdmmc_adma_desc_t g_adma_desc
   __attribute__((section(".nocache"), aligned(4)));
 #endif
@@ -473,10 +506,7 @@ static inline void sam_putreg(struct sam_dev_s *priv, uint32_t value,
   sam_putreg32(priv, value, offset);
 }
 
-static void sam_takesem(struct sam_dev_s *priv)
-{
-  nxsem_wait_uninterruptible(&priv->waitsem);
-}
+#define sam_takesem(priv) nxsem_wait_uninterruptible(&(priv)->waitsem)
 
 static void sam_configwaitints(struct sam_dev_s *priv, uint32_t waitints,
                                 sdio_eventset_t waitevents,
@@ -489,7 +519,7 @@ static void sam_configwaitints(struct sam_dev_s *priv, uint32_t waitints,
   priv->wkupevent  = wkupevent;
   priv->waitints   = waitints;
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
   priv->xfrflags   = 0;
 #endif
 
@@ -545,7 +575,7 @@ static inline void sam_dataconfig(struct sam_dev_s *priv, bool bwrite,
  * PIO (non-DMA) data transfer helpers
  ****************************************************************************/
 
-#ifndef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifndef CONFIG_PIC32CZCA90_SDMMC0_DMA
 static void sam_transmit(struct sam_dev_s *priv)
 {
   union { uint32_t w; uint8_t b[4]; } data;
@@ -607,7 +637,7 @@ static void sam_receive(struct sam_dev_s *priv)
     }
 
 }
-#endif /* !CONFIG_PIC32CZCA90_SDMMC1_DMA */
+#endif /* !CONFIG_PIC32CZCA90_SDMMC0_DMA */
 
 /****************************************************************************
  * Event helpers
@@ -626,11 +656,11 @@ static void sam_eventtimeout(wdparm_t arg)
   uint32_t psr    = sam_getreg(priv, SAM_SDMMC_PSR_OFFSET);
   uint8_t  aesr   = sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET);
 
-  _err("SDMMC TIMEOUT: NISTR=%08" PRIx32 " NISIER=%08" PRIx32
-       " PSR=%08" PRIx32 " AESR=%02x\n", nistr, nisier, psr, aesr);
-  _err("  waitevents=%02x wkupevent=%02x xfrints=%08" PRIx32
-       " waitints=%08" PRIx32 "\n",
-       priv->waitevents, priv->wkupevent, priv->xfrints, priv->waitints);
+  mcerr("SDMMC TIMEOUT: NISTR=%08" PRIx32 " NISIER=%08" PRIx32
+        " PSR=%08" PRIx32 " AESR=%02x\n", nistr, nisier, psr, aesr);
+  mcerr("  waitevents=%02x wkupevent=%02x xfrints=%08" PRIx32
+        " waitints=%08" PRIx32 "\n",
+        priv->waitevents, priv->wkupevent, priv->xfrints, priv->waitints);
 
   if ((priv->waitevents & SDIOWAIT_TIMEOUT) != 0)
     {
@@ -657,10 +687,33 @@ static void sam_endtransfer(struct sam_dev_s *priv,
 
   priv->remaining = 0;
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
   up_invalidate_dcache((uintptr_t)priv->buffer,
                        (uintptr_t)priv->bufferend);
 #endif
+
+  /* One-shot sector dump: fires on first successful read of >= 512 bytes.
+   * In 1-bit mode this captures the actual sector 0 content so it can be
+   * compared byte-for-byte with the 4-bit DATCRC dump. */
+  static bool s_sector_dumped;
+  if (!s_sector_dumped && !(wkupevent & SDIOWAIT_ERROR) &&
+      priv->buffer != NULL &&
+      ((uintptr_t)priv->bufferend - (uintptr_t)priv->buffer) >= 512u)
+    {
+      s_sector_dumped = true;
+      uint8_t *b = (uint8_t *)priv->buffer;
+      uint8_t hc1 = sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET);
+      _alert("SDMMC %s ok rxbuf[0..31]:"
+             " %02x %02x %02x %02x %02x %02x %02x %02x"
+             " %02x %02x %02x %02x %02x %02x %02x %02x"
+             " %02x %02x %02x %02x %02x %02x %02x %02x"
+             " %02x %02x %02x %02x %02x %02x %02x %02x\n",
+             (hc1 & 0x02u) ? "4bit" : "1bit",
+             b[0],  b[1],  b[2],  b[3],  b[4],  b[5],  b[6],  b[7],
+             b[8],  b[9],  b[10], b[11], b[12], b[13], b[14], b[15],
+             b[16], b[17], b[18], b[19], b[20], b[21], b[22], b[23],
+             b[24], b[25], b[26], b[27], b[28], b[29], b[30], b[31]);
+    }
 
   if ((priv->waitevents & wkupevent) != 0)
     {
@@ -680,23 +733,28 @@ static int sam_interrupt(int irq, void *context, void *arg)
   uint32_t nisier;
   uint32_t nistr;
 
-  /* 32-bit read at NISIER_OFFSET covers NISIER[15:0] + EISIER[31:16] */
+  /* Build combined 32-bit enabled mask from two separate 16-bit registers.
+   * NISIER (0x38) and EISIER (0x3A) are independent 16-bit registers — a
+   * 32-bit read at 0x38 returns NISIER only (hardware zeroes bits[31:16]).
+   * Must read them separately and combine to match the combined NISTR view. */
 
-  nisier  = sam_getreg(priv, SAM_SDMMC_NISIER_OFFSET);
+  nisier = (uint32_t)sam_getreg16(priv, SAM_SDMMC_NISIER_OFFSET) |
+           ((uint32_t)sam_getreg16(priv, SAM_SDMMC_EISIER_OFFSET) << 16);
 
   /* 32-bit read at NISTR_OFFSET covers NISTR[15:0] + EISTR[31:16] */
 
-  nistr   = sam_getreg32(priv, SAM_SDMMC_NISTR_OFFSET);
+  nistr            = sam_getreg32(priv, SAM_SDMMC_NISTR_OFFSET);
+  priv->last_nistr = nistr;
   enabled = nistr & nisier;
   pending = enabled & priv->xfrints;
 
-  mcinfo("ISR: NISTR=%04" PRIx32 " EISTR=%04" PRIx32
-         " NISIER=%04" PRIx32 " pending=%08" PRIx32 "\n",
-         nistr & 0xffffu, nistr >> 16, nisier & 0xffffu, pending);
+  mcinfo("ISR: nistr=%08" PRIx32 " pending=%08" PRIx32
+         " eistr=%04" PRIx32 "\n",
+         nistr, pending, nistr >> 16);
 
   if (pending != 0)
     {
-#ifndef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifndef CONFIG_PIC32CZCA90_SDMMC0_DMA
       if ((pending & SDMMC_INT_BRR) != 0)
         {
           sam_receive(priv);
@@ -723,27 +781,85 @@ static int sam_interrupt(int irq, void *context, void *arg)
       else if ((pending & (SDMMC_INT_DCE | SDMMC_INT_DTOE |
                            SDMMC_INT_ADMAE)) != 0)
         {
+          priv->last_eistr   = sam_getreg16(priv, SAM_SDMMC_EISTR_OFFSET);
+          priv->last_psr_err = sam_getreg(priv, SAM_SDMMC_PSR_OFFSET);
+          _alert("SDMMC ISR err: pending=%08" PRIx32 " NISTR=%08" PRIx32
+                 " EISTR=%04" PRIx32 " PSR=%08" PRIx32 " AESR=%02" PRIx32
+                 " DBGR=%08" PRIx32 " CCR=%04" PRIx32 "\n",
+                  pending,
+                  sam_getreg(priv, SAM_SDMMC_NISTR_OFFSET),
+                  priv->last_eistr,
+                  priv->last_psr_err,
+                  (uint32_t)sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET),
+                  sam_getreg(priv, SAM_SDMMC_DBGR_OFFSET),
+                  (uint32_t)sam_getreg16(priv, SAM_SDMMC_CCR_OFFSET));
           if ((pending & SDMMC_INT_ADMAE) != 0)
             {
-              mcerr("SDMMC: ADMA error (AESR=0x%02" PRIx32 ")\n",
-                    sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET));
+              _alert("SDMMC: ADMA error (AESR=0x%02" PRIx32 ")\n",
+                     sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET));
             }
           else if ((pending & SDMMC_INT_DCE) != 0)
             {
-              mcerr("SDMMC: data CRC error\n");
+              /* Decode DAT[3:0] at CRC error time.
+               * A line stuck HIGH (1) while others toggle indicates it is
+               * not physically reaching the card (NC on Click board). */
+              uint32_t psr_crc = sam_getreg(priv, SAM_SDMMC_PSR_OFFSET);
+              uint32_t dat_crc = (psr_crc >> 20) & 0xfu;
+              _alert("SDMMC: data CRC error PSR=%08" PRIx32
+                     " DAT[3:0]=0x%" PRIx32
+                     " (D3=%u D2=%u D1=%u D0=%u) HC1=%02x\n",
+                     psr_crc, dat_crc,
+                     (unsigned)((dat_crc >> 3) & 1),
+                     (unsigned)((dat_crc >> 2) & 1),
+                     (unsigned)((dat_crc >> 1) & 1),
+                     (unsigned)(dat_crc & 1),
+                     (unsigned)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET));
+
+              /* Dump first 32 received bytes — compare with "ok rxbuf" from
+               * 1-bit mode to see whether data is corrupted or just CRC. */
+              if (priv->buffer != NULL && priv->bufferend > priv->buffer)
+                {
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
+                  up_invalidate_dcache((uintptr_t)priv->buffer,
+                                       (uintptr_t)priv->bufferend);
+#endif
+                  uint8_t *b2 = (uint8_t *)priv->buffer;
+                  _alert("SDMMC 4bit DATCRC rxbuf[0..31]:"
+                         " %02x %02x %02x %02x %02x %02x %02x %02x"
+                         " %02x %02x %02x %02x %02x %02x %02x %02x"
+                         " %02x %02x %02x %02x %02x %02x %02x %02x"
+                         " %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                         b2[0],  b2[1],  b2[2],  b2[3],
+                         b2[4],  b2[5],  b2[6],  b2[7],
+                         b2[8],  b2[9],  b2[10], b2[11],
+                         b2[12], b2[13], b2[14], b2[15],
+                         b2[16], b2[17], b2[18], b2[19],
+                         b2[20], b2[21], b2[22], b2[23],
+                         b2[24], b2[25], b2[26], b2[27],
+                         b2[28], b2[29], b2[30], b2[31]);
+                }
             }
           else
             {
-              mcerr("SDMMC: data timeout\n");
+              _alert("SDMMC: data timeout\n");
             }
 
-          /* SW reset DAT lane — clears DAT inhibit so next transfer can start.
-           * Reset DAT line. */
+          /* SW reset DAT lane — clears DAT inhibit so next transfer can start. */
 
           sam_putreg8(priv, SDMMC_RESET_DATA, SAM_SDMMC_SRR_OFFSET);
           while (sam_getreg8(priv, SAM_SDMMC_SRR_OFFSET) & SDMMC_RESET_DATA)
             ;
 
+#if SDMMC0_DEBUG_BYPASS_DATCRC
+          /* Bypass DATCRC: treat as success so mmcsd sees the received data.
+           * If the card mounts → data path OK, CRC check broken.
+           * If mount still fails → received data is corrupt. */
+          if ((pending & SDMMC_INT_DCE) != 0)
+            {
+              sam_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
+            }
+          else
+#endif
           sam_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
         }
     }
@@ -810,7 +926,7 @@ static void sam_reset(struct sdio_dev_s *dev)
   unsigned long timeout_ms;
   uint8_t hc1;
 
-  sdmmc1_clk_enable();
+  sdmmc0_clk_enable();
 
   /* Disable all interrupt signals before reset */
 
@@ -854,7 +970,7 @@ static void sam_reset(struct sdio_dev_s *dev)
 
   hc1  = (uint8_t)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET);
   hc1 &= (uint8_t)~SDMMC_HC1_DMAS_MASK;
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
   hc1 |= (uint8_t)SDMMC_HC1_DMAS_ADMA;
 #endif
   sam_putreg8(priv, hc1, SAM_SDMMC_HC1R_OFFSET);
@@ -882,8 +998,9 @@ static void sam_reset(struct sdio_dev_s *dev)
   priv->waitevents = 0;
   priv->waitints   = 0;
   priv->wkupevent  = 0;
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
-  priv->xfrflags   = 0;
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
+  priv->xfrflags    = 0;
+  priv->pending_asar = 0;
 #endif
 
   wd_cancel(&priv->waitwdog);
@@ -897,11 +1014,13 @@ static sdio_capset_t sam_capabilities(struct sdio_dev_s *dev)
 {
   sdio_capset_t caps = 0;
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_WIDTH_D1_D4
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_WIDTH_D1_D4
   caps |= SDIO_CAPS_4BIT;
+#else
+  caps |= SDIO_CAPS_1BIT_ONLY;  /* DAT1/2/3 not connected — prevent ACMD6 */
 #endif
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
   caps |= SDIO_CAPS_DMASUPPORTED;
 #endif
   caps |= SDIO_CAPS_DMABEFOREWRITE;
@@ -942,10 +1061,43 @@ static void sam_widebus(struct sdio_dev_s *dev, bool wide)
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
   uint32_t regval;
 
+#ifndef CONFIG_PIC32CZCA90_SDMMC0_WIDTH_D1_D4
+  wide = false;  /* 1-bit only — DAT1/2/3 not muxed */
+#endif
+
+  if (wide)
+    {
+      /* In 1-bit mode the SDMMC peripheral drives DAT1-3 as outputs LOW.
+       * SRR.SWRSTDAT forces all DAT outputs HIGH (SD Host Ctrl Spec §2.2.17),
+       * releasing that drive before we switch HC1R to 4-bit input mode. */
+
+      sam_putreg8(priv, SDMMC_RESET_DATA, SAM_SDMMC_SRR_OFFSET);
+      while (sam_getreg8(priv, SAM_SDMMC_SRR_OFFSET) & SDMMC_RESET_DATA)
+        ;
+    }
+
   regval  = sam_getreg(priv, SAM_SDMMC_HC1R_OFFSET);
   regval &= ~SDMMC_HC1_DTW_MASK;
   regval |= wide ? SDMMC_HC1_DTW_4BIT : SDMMC_HC1_DTW_1BIT;
   sam_putreg(priv, regval, SAM_SDMMC_HC1R_OFFSET);
+
+  /* DAT line diagnostic: sample PSR immediately after host width change.
+   * PSR[23:20] = DAT[3:0] live signal levels (1=HIGH, 0=LOW).
+   * In 4-bit mode, all four should be HIGH at idle (SD card internal pull-ups).
+   * If DAT1(bit21) or DAT2(bit22) read 0, the lines are not connected
+   * (typical for SPI-mode Click boards that leave DAT1/DAT2 as NC). */
+  {
+    uint32_t psr = sam_getreg(priv, SAM_SDMMC_PSR_OFFSET);
+    uint32_t dat = (psr >> 20) & 0xfu;
+    mcwarn("SDMMC widebus(%s): HC1=%02x PSR=%08" PRIx32
+           " DAT[3:0]=0x%" PRIx32 " (D3=%u D2=%u D1=%u D0=%u)%s\n",
+           wide ? "4bit" : "1bit",
+           (unsigned)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET),
+           psr, dat,
+           (unsigned)((dat >> 3) & 1), (unsigned)((dat >> 2) & 1),
+           (unsigned)((dat >> 1) & 1), (unsigned)(dat & 1),
+           dat == 0xfu ? "" : " *** LINE(S) LOW - check Click board wiring");
+  }
 }
 
 static void sam_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
@@ -981,12 +1133,40 @@ static void sam_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
                   sam_getreg(priv, SAM_SDMMC_PSR_OFFSET));
           }
       }
+
+      /* One-shot diagnostic: clock dividers and DAT idle levels.
+       * PSR bits[23:20] = DAT[3:0] idle.  All four should be 1 at idle
+       * (SD spec: card internal pull-up 50 kΩ).  If DAT1 or DAT3 reads 0
+       * the adapter may have a pull-down on those lines. */
+
+      {
+        uint32_t psr  = sam_getreg(priv, SAM_SDMMC_PSR_OFFSET);
+        uint32_t ca0r = sam_getreg(priv, SAM_SDMMC_CA0R_OFFSET);
+        uint32_t ca1r = sam_getreg(priv, SAM_SDMMC_CA1R_OFFSET);
+        uint16_t ccr  = sam_getreg16(priv, SAM_SDMMC_CCR_OFFSET);
+        uint32_t cc2r = sam_getreg32(priv, SAM_SDMMC_CC2R_OFFSET);
+        uint8_t  hc1  = sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET);
+        uint32_t dat_idle = (psr >> 20) & 0xf;
+
+        mcwarn("SDMMC card ready: PSR=%08" PRIx32 " HC1=%02x CCR=%04x"
+               " CC2R=%08" PRIx32 " CA0R=%08" PRIx32 " CA1R=%08" PRIx32 "\n",
+               psr, hc1, ccr, cc2r, ca0r, ca1r);
+
+        if (dat_idle != 0xfu)
+          {
+            mcwarn("SDMMC DAT idle=0x%" PRIx32 " (expect 0xf): DAT[3:0]"
+                   " not all HIGH — check adapter/wiring\n", dat_idle);
+          }
+      }
       break;
 
     case CLOCK_MMC_TRANSFER:
     case CLOCK_SD_TRANSFER_1BIT:
+      sam_set_clock(priv, SDMMC_CLOCK_FREQ_400_KHZ);
+      break;
+
     case CLOCK_SD_TRANSFER_4BIT:
-      sam_set_clock(priv, SDMMC_CLOCK_FREQ_25_MHZ);
+      sam_set_clock(priv, SDMMC_CLOCK_FREQ_400_KHZ);
       break;
     }
 }
@@ -996,15 +1176,15 @@ static int sam_attach(struct sdio_dev_s *dev)
   int ret;
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
 
-  ret = irq_attach(SAM_IRQ_SDMMC1, sam_interrupt, priv);
+  ret = irq_attach(SAM_SDMMC_IRQ, sam_interrupt, priv);
 
   if (ret == OK)
     {
       sam_putreg16(priv, 0, SAM_SDMMC_NISIER_OFFSET);
       sam_putreg16(priv, 0, SAM_SDMMC_EISIER_OFFSET);
       sam_putreg(priv, SDMMC_INT_ALL, SAM_SDMMC_NISTR_OFFSET);
-      up_enable_irq(SAM_IRQ_SDMMC1);
-    }
+      up_enable_irq(SAM_SDMMC_IRQ);
+      }
 
   return ret;
 }
@@ -1026,7 +1206,7 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
   if (cmd & MMCSD_WRXFR)
     {
       regval |= SDMMC_CMD_DPSEL;
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
       regval |= SDMMC_CMD_DMAEN;
 #endif
       if (cmd & MMCSD_MULTIBLOCK)
@@ -1041,7 +1221,7 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
   else if (cmd & MMCSD_DATAXFR)
     {
       regval |= SDMMC_CMD_DPSEL | SDMMC_CMD_DTDSEL;
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
       regval |= SDMMC_CMD_DMAEN;
 #endif
       if (cmd & MMCSD_MULTIBLOCK)
@@ -1153,6 +1333,28 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
     priv->last_arg    = arg;
     priv->last_tmr_cr = regval;
     sam_putreg(priv, arg,    SAM_SDMMC_ARG1R_OFFSET);
+
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
+    /* Write ASAR at the same time as the command register so ADMA2 starts
+     * only when the data transfer command is issued, not earlier. */
+    if ((regval & SDMMC_CMD_DPSEL) && priv->pending_asar != 0)
+      {
+        sam_putreg(priv, priv->pending_asar, SAM_SDMMC_ASAR_OFFSET);
+        priv->pending_asar = 0;
+      }
+#endif
+
+    if (regval & SDMMC_CMD_DPSEL)
+      {
+        mcinfo("CMD%u data: TMR=%08" PRIx32 " NISIER=%04" PRIx32
+               " EISIER=%04" PRIx32 " ASAR=%08" PRIx32 " HC1=%02x\n",
+               (regval >> 24) & 0x3fu, regval,
+               (uint32_t)sam_getreg16(priv, SAM_SDMMC_NISIER_OFFSET),
+               (uint32_t)sam_getreg16(priv, SAM_SDMMC_EISIER_OFFSET),
+               sam_getreg(priv, SAM_SDMMC_ASAR_OFFSET),
+               (uint8_t)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET));
+      }
+
     sam_putreg(priv, regval, SAM_SDMMC_TMR_OFFSET);
 
     leave_critical_section(isrflags);
@@ -1167,18 +1369,22 @@ static void sam_blocksetup(struct sdio_dev_s *dev,
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
 
-  sam_putreg(priv, (nblocks << 16) | (blocklen & 0xffffu),
+  /* BSR: bits[9:0]=BLOCKSIZE (DFP BLOCKSIZE_Msk=0x3FF), bits[31:16]=BCNT */
+  sam_putreg(priv, (nblocks << 16) | (blocklen & 0x3ffu),
              SAM_SDMMC_BSR_OFFSET);
 }
 #endif
 
-#ifndef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifndef CONFIG_PIC32CZCA90_SDMMC0_DMA
 static int sam_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
                           size_t nbytes)
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev;
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
   DEBUGASSERT(((uint32_t)(uintptr_t)buffer & 3) == 0);
+
+  mcinfo("recvsetup PIO: buf=%08" PRIx32 " len=%zu\n",
+         (uint32_t)(uintptr_t)buffer, nbytes);
 
   priv->buffer    = (uint32_t *)buffer;
   priv->remaining = nbytes;
@@ -1204,7 +1410,7 @@ static int sam_sendsetup(struct sdio_dev_s *dev,
 
   return OK;
 }
-#endif /* !CONFIG_PIC32CZCA90_SDMMC1_DMA */
+#endif /* !CONFIG_PIC32CZCA90_SDMMC0_DMA */
 
 static int sam_cancel(struct sdio_dev_s *dev)
 {
@@ -1217,7 +1423,7 @@ static int sam_cancel(struct sdio_dev_s *dev)
   priv->waitevents = 0;
   priv->wkupevent  = 0;
   priv->waitints   = 0;
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
   priv->xfrflags   = 0;
 #endif
 
@@ -1476,7 +1682,7 @@ static void sam_waitenable(struct sdio_dev_s *dev,
 
   if ((eventset & SDIOWAIT_TRANSFERDONE) != 0)
     {
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
       /* DMA mode: ADMA2 owns the buffer; BRR/BWR have no ISR handler here
        * and would storm if left enabled.  Only TC + data error bits needed. */
 
@@ -1508,8 +1714,66 @@ static sdio_eventset_t sam_eventwait(struct sdio_dev_s *dev)
 
   DEBUGASSERT(priv->waitevents != 0 || priv->wkupevent != 0);
 
-  sam_takesem(priv);
-  wkupevent = priv->wkupevent;
+  /* Spin-poll priv->wkupevent (set by ISR via sam_endtransfer).
+   * 5 s timeout covers both fast reads (~15 ms) and slow-card multi-block
+   * writes where the card holds DAT0 busy during flash programming. */
+
+  {
+    int i;
+    const int ITERS = 500000;  /* 5 s = 500000 × 10 µs */
+
+    for (i = 0; i < ITERS; i++)
+      {
+        wkupevent = priv->wkupevent;
+        if (wkupevent != 0)
+          {
+            break;
+          }
+
+        up_udelay(10);
+      }
+
+    if (i == ITERS)
+      {
+        mcerr("SDMMC: eventwait timeout 5s PSR=%08" PRIx32
+              " NISTR=%08" PRIx32 "\n",
+              sam_getreg(priv, SAM_SDMMC_PSR_OFFSET),
+              sam_getreg32(priv, SAM_SDMMC_NISTR_OFFSET));
+        wkupevent = SDIOWAIT_TIMEOUT;
+      }
+    else if ((wkupevent & SDIOWAIT_ERROR) != 0)
+      {
+        uint32_t dat = (priv->last_psr_err >> 20) & 0xfu;
+        printf("SDMMC err: EISTR=%04" PRIx32 " NISTR=%08" PRIx32
+               " PSR=%08" PRIx32 " DAT[3:0]=%x (D3=%u D2=%u D1=%u D0=%u)"
+               " HC1=%02x ADMAES=%02x\n",
+               (uint32_t)priv->last_eistr,
+               (uint32_t)priv->last_nistr,
+               priv->last_psr_err, (unsigned)dat,
+               (unsigned)((dat>>3)&1), (unsigned)((dat>>2)&1),
+               (unsigned)((dat>>1)&1), (unsigned)(dat&1),
+               (unsigned)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET),
+               (unsigned)sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET));
+
+        /* Dump first 32 bytes of DMA receive buffer.
+         * ADMA2 writes data byte-by-byte as received; CRC check is at end.
+         * So after DATCRC fires, buffer[0..511] = actual received bytes.
+         * All 0xFF = DAT lines stuck HIGH (card never drove them = not wired).
+         * Mixed pattern = lines working but bit error on one lane. */
+        if (priv->buffer != NULL)
+          {
+            const uint8_t *b = (const uint8_t *)priv->buffer;
+            printf("SDMMC rxbuf[0..31]:");
+            for (int _i = 0; _i < 32; _i++)
+              {
+                printf(" %02x", b[_i]);
+              }
+            printf("\n");
+          }
+      }
+  }
+
+  wd_cancel(&priv->waitwdog);
 
   priv->waitevents = 0;
   priv->wkupevent  = 0;
@@ -1544,13 +1808,13 @@ static int sam_registercallback(struct sdio_dev_s *dev,
 }
 
 /****************************************************************************
- * ADMA2 DMA setup (when CONFIG_PIC32CZCA90_SDMMC1_DMA=y)
+ * ADMA2 DMA setup (when CONFIG_PIC32CZCA90_SDMMC0_DMA=y)
  * Single descriptor covers the full transfer buffer (max 65535 bytes).
  * D-cache must be coherent: invalidate RX before DMA, clean TX before DMA,
  * clean descriptor table before writing its address to ASAR.
  ****************************************************************************/
 
-#ifdef CONFIG_PIC32CZCA90_SDMMC1_DMA
+#ifdef CONFIG_PIC32CZCA90_SDMMC0_DMA
 
 static int sam_dmarecvsetup(struct sdio_dev_s *dev,
                              uint8_t *buffer, size_t buflen)
@@ -1589,20 +1853,14 @@ static int sam_dmarecvsetup(struct sdio_dev_s *dev,
   hc1 |= (uint8_t)SDMMC_HC1_DMAS_ADMA;
   sam_putreg8(priv, hc1, SAM_SDMMC_HC1R_OFFSET);
 
-  /* Write descriptor table base address to ASAR */
+  /* Defer ASAR write to sam_sendcmd — ADMA2 starts fetching immediately
+   * when ASAR is written; writing it here (before CMD17 is issued) causes
+   * the engine to run against an empty FIFO and finish before data arrives. */
 
-  sam_putreg(priv, (uint32_t)(uintptr_t)&g_adma_desc,
-             SAM_SDMMC_ASAR_OFFSET);
+  priv->pending_asar = (uint32_t)(uintptr_t)&g_adma_desc;
 
   sam_configxfrints(priv, SDMMC_DMADONE_INTS | SDMMC_INT_DINT);
 
-  mcinfo("dmarecv: buf=%p len=%zu desc@%p attr=%04x ASAR=%08" PRIx32
-         " HC1R=%02" PRIx32 " NISIER=%08" PRIx32 "\n",
-         buffer, buflen, &g_adma_desc,
-         g_adma_desc.attribute,
-         sam_getreg(priv, SAM_SDMMC_ASAR_OFFSET),
-         (uint32_t)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET),
-         sam_getreg(priv, SAM_SDMMC_NISIER_OFFSET));
   return OK;
 }
 
@@ -1639,14 +1897,15 @@ static int sam_dmasendsetup(struct sdio_dev_s *dev,
   hc1 |= (uint8_t)SDMMC_HC1_DMAS_ADMA;
   sam_putreg8(priv, hc1, SAM_SDMMC_HC1R_OFFSET);
 
-  sam_putreg(priv, (uint32_t)(uintptr_t)&g_adma_desc,
-             SAM_SDMMC_ASAR_OFFSET);
+  /* Defer ASAR write to sam_sendcmd — same reason as dmarecvsetup. */
+
+  priv->pending_asar = (uint32_t)(uintptr_t)&g_adma_desc;
 
   sam_configxfrints(priv, SDMMC_DMADONE_INTS | SDMMC_INT_DINT);
   return OK;
 }
 
-#endif /* CONFIG_PIC32CZCA90_SDMMC1_DMA */
+#endif /* CONFIG_PIC32CZCA90_SDMMC0_DMA */
 
 /****************************************************************************
  * Callback
@@ -1692,7 +1951,7 @@ static void sam_callback(void *arg)
  * UHS mode timing (HC2R)
  ****************************************************************************/
 
-static void sam_set_uhs_timing(struct sam_dev_s *priv,
+static void __attribute__((unused)) sam_set_uhs_timing(struct sam_dev_s *priv,
                                 enum bus_mode selected_mode)
 {
   uint16_t reg;
@@ -1771,7 +2030,9 @@ static int sam_set_clock(struct sam_dev_s *priv, uint32_t clock)
              >> SDMMC_CA0R_BASECLKF_Pos;
   if (baseclk == 0u)
     {
-      baseclk = SDMMC1_BASE_CLOCK_FREQUENCY / 2u;
+      /* CA0R.BASECLKF=0 means "use another method" (DFP: BASECLKF_OTHER).
+       * Use the actual GCLK4 frequency programmed in sdmmc0_clk_enable(). */
+      baseclk = SDMMC0_BASE_CLOCK_FREQUENCY;
     }
   else
     {
@@ -1787,7 +2048,7 @@ static int sam_set_clock(struct sam_dev_s *priv, uint32_t clock)
    * IP limitation: if HSEN and div==0, force div=1. */
 
   hc1 = (uint8_t)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET);
-  if (clock > SDMMC1_BUS_HIGH_SPEED_THRESHOLD)
+  if (clock > SDMMC0_BUS_HIGH_SPEED_THRESHOLD)
     {
       hc1 |= (uint8_t)SDMMC_HC1_HSEN;
     }
@@ -1800,13 +2061,16 @@ static int sam_set_clock(struct sam_dev_s *priv, uint32_t clock)
 
   if (clkmul > 0u)
     {
-      /* Programmable mode:
-       * F_SDCLK = (baseclk × (clkmul+1)) / (divider+1) */
-
-      div = (baseclk * (clkmul + 1u)) / clock;
+      /* Programmable mode: F_SDCLK = baseclk*(clkmul+1)/(div+1).
+       * Ceiling division guarantees F_SDCLK ≤ target on all inputs. */
+      div = (baseclk * (clkmul + 1u) + clock - 1u) / clock;
       if (div > 0u)
         {
           div--;
+        }
+      if (div > 1023u)
+        {
+          div = 1023u;
         }
 
       /* IP limitation: HSEN set requires divider ≥ 1 */
@@ -1887,15 +2151,8 @@ static void sam_power(struct sam_dev_s *priv)
     }
 
   sam_putreg8(priv, card_power, SAM_SDMMC_PCR_OFFSET);
-
-  if (caps0 & SDMMC_CA0_DDR50)
-    {
-      sam_set_uhs_timing(priv, UHS_DDR50);
-    }
-  else if (caps0 & SDMMC_CA0_SDR50)
-    {
-      sam_set_uhs_timing(priv, UHS_SDR50);
-    }
+  /* UHS timing (DDR50/SDR50/SDR104) is negotiated during CMD6/CMD11 later,
+   * not set unconditionally at power-on. HC2R stays at SDR12 default. */
 }
 
 static int sam_set_interrupts(struct sam_dev_s *priv)
@@ -1911,17 +2168,18 @@ static int sam_set_interrupts(struct sam_dev_s *priv)
   sam_putreg16(priv, (uint16_t)(SDMMC_INT_CINS | SDMMC_INT_CRM),
                SAM_SDMMC_NISIER_OFFSET);
   sam_putreg16(priv, 0, SAM_SDMMC_EISIER_OFFSET);
+
   return OK;
 }
 
 /****************************************************************************
  * CA90 clock enable helper.
  *
- * Enables GCLK4 (100 MHz, channel 60) and GCLK5 (12 MHz, channel 61) for
- * SDMMC1, plus MCLK AHB (ID=71) and APB (ID=72) gates.
+ * Enables GCLK4 (100 MHz, channel 58) and GCLK5 (12 MHz, channel 59) for
+ * SDMMC0, plus MCLK AHB (ID=69) and APB (ID=70) gates.
  ****************************************************************************/
 
-void sdmmc1_clk_enable(void)
+void sdmmc0_clk_enable(void)
 {
   uint32_t id;
   uint32_t reg;
@@ -1951,24 +2209,24 @@ void sdmmc1_clk_enable(void)
 
   sam_gclk_configure(5, &gclk5_cfg);
 
-  /* GCLK4 → SDMMC1 main clock (GCLK_PCHCTRL[60]) */
+  /* GCLK4 → SDMMC0 main clock (GCLK_PCHCTRL[58]) */
 
-  sam_gclk_chan_enable(SAM_SDMMC1_GCLK_ID, 4u, false);
+  sam_gclk_chan_enable(SAM_SDMMC_GCLK_ID, 4u, false);
 
-  /* GCLK5 → SDMMC1 slow clock (GCLK_PCHCTRL[61]) */
+  /* GCLK5 → SDMMC0 slow clock (GCLK_PCHCTRL[59]) */
 
-  sam_gclk_chan_enable(SAM_SDMMC1_GCLK_ID_SLOW, 5u, false);
+  sam_gclk_chan_enable(SAM_SDMMC_GCLK_ID_SLOW, 5u, false);
 
   /* MCLK AHB */
 
-  id  = SAM_SDMMC1_MCLK_ID_AHB;
+  id  = SAM_SDMMC_MCLK_ID_AHB;
   reg = SAM_MCLK_CLKMSK_ADDR(id);
   bit = SAM_MCLK_CLKMSK_BIT(id);
   putreg32(getreg32(reg) | bit, reg);
 
   /* MCLK APB */
 
-  id  = SAM_SDMMC1_MCLK_ID_APB;
+  id  = SAM_SDMMC_MCLK_ID_APB;
   reg = SAM_MCLK_CLKMSK_ADDR(id);
   bit = SAM_MCLK_CLKMSK_BIT(id);
   putreg32(getreg32(reg) | bit, reg);
@@ -1976,31 +2234,42 @@ void sdmmc1_clk_enable(void)
 }
 
 /****************************************************************************
- * Public Function: sam_sdmmc1_initialize
+ * Public Function: sam_sdmmc0_initialize
  *
- * Called from board_app_initialize() after shared pins are muxed to SDMMC1
+ * Called from board_app_initialize() after shared pins are muxed to SDMMC0
  * function (mux I = 8). Returns the sdio_dev_s pointer to pass to
  * mmcsd_slotinitialize().
  ****************************************************************************/
 
-struct sdio_dev_s *sam_sdmmc1_initialize(void)
+struct sdio_dev_s *sam_sdmmc0_initialize(void)
 {
   struct sam_dev_s *priv = &g_sdmmcdev;
 
   nxsem_init(&priv->waitsem, 0, 0);
   nxsem_set_protocol(&priv->waitsem, SEM_PRIO_NONE);
 
-  priv->base = SAM_SDMMC1_BASE;
+  priv->base = SAM_SDMMC_BASE;
 
-  /* Configure CD pin (PC28, GPIO input, pull-up, active LOW) */
-
-#if defined(PIN_SDMMC1_CD)
-  sam_portconfig(PIN_SDMMC1_CD);
-  priv->sw_cd_gpio  = PIN_SDMMC1_CD;
-  priv->cd_invert   = 0;
+#if SDMMC_TEST_USE_SDMMC1
+  /* SDMMC1 on-board socket: PC30/PG00-03, mux I=8 (shared with SQI1 mux H=7).
+   * Configure all data/clock/cmd pins here; init.c configures SDMMC0 EXT pins
+   * which are harmless (not driven by any peripheral when SDMMC0 unused). */
+  sam_portconfig(PORT_SDMMC1_CLK);
+  sam_portconfig(PORT_SDMMC1_CMD);
+  sam_portconfig(PORT_SDMMC1_DAT0);
+  sam_portconfig(PORT_SDMMC1_DAT1);
+  sam_portconfig(PORT_SDMMC1_DAT2);
+  sam_portconfig(PORT_SDMMC1_DAT3);
 #endif
 
-  sdmmc1_clk_enable();
+  /* Configure CD pin.
+   * Pull-up ensures SDMMC_PSR.CARDINS=0 when no card is inserted.
+   * When a card is present its CD contact pulls the pin LOW → CARDINS=1. */
+  sam_portconfig(PORT_SDMMC_CD);
+  priv->sw_cd_gpio  = 0;   /* use hardware PSR.CARDINS, not GPIO read */
+  priv->cd_invert   = 0;
+
+  sdmmc0_clk_enable();
 
   /* Wait for GCLK4/GCLK5/MCLK gates to propagate before accessing SDMMC
    * registers.  Also forces arm_udelay.o to be co-linked from libarch.a:
@@ -2095,7 +2364,7 @@ void sam_sdmmc_set_sdio_card_isr(struct sdio_dev_s *dev,
 }
 
 /****************************************************************************
- * Public Function: sam_sdmmc1_slotinitialize
+ * Public Function: sam_sdmmc0_slotinitialize
  *
  * Combined init + mmcsd_slotinitialize wrapper following SAMV7 chip-layer
  * pattern (arch/arm/src/samv7/sam_hsmci.c).
@@ -2108,16 +2377,16 @@ void sam_sdmmc_set_sdio_card_isr(struct sdio_dev_s *dev,
  * re-scanned after the group closes.
  ****************************************************************************/
 
-int sam_sdmmc1_slotinitialize(int minor)
+int sam_sdmmc0_slotinitialize(int minor)
 {
-  struct sdio_dev_s *sdio = sam_sdmmc1_initialize();
+  struct sdio_dev_s *sdio = sam_sdmmc0_initialize();
   if (sdio == NULL)
     {
-      syslog(LOG_ERR, "sam_sdmmc1_slotinitialize: hw init failed\n");
+      syslog(LOG_ERR, "sam_sdmmc0_slotinitialize: hw init failed\n");
       return -ENODEV;
     }
 
   return mmcsd_slotinitialize(minor, sdio);
 }
 
-#endif /* CONFIG_PIC32CZCA90_SDMMC1 */
+#endif /* CONFIG_PIC32CZCA90_SDMMC0 */

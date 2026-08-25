@@ -65,6 +65,11 @@ static void sam_stack_color(FAR void *stackbase, size_t nbytes)
  *   This is the reset entry point.
  ****************************************************************************/
 
+/* Linker-defined symbols for the DMA nocache region */
+
+extern uint8_t _s_nocache[];
+extern uint8_t _e_nocache[];
+
 void __start(void)
 {
   const uint32_t *src;
@@ -77,6 +82,11 @@ void __start(void)
 
   extern const uint32_t _vectors[];
   putreg32((uint32_t)_vectors, NVIC_VECTAB);
+
+#ifdef CONFIG_ARM_MPU_EARLY_RESET
+  /* Clear any bootloader MPU configuration before we set up ours. */
+  mpu_early_reset();
+#endif
 
 #ifdef CONFIG_ARMV7M_STACKCHECK
   /* Set the stack limit before we attempt to call any functions */
@@ -121,11 +131,23 @@ void __start(void)
   sam_userspace();
 #endif
 
-  /* MPU nocache regions — DISABLED pending debug.
-   * TODO: enable once board boots reliably with MPU active.
-   * For now, sam_sqi.c uses manual DCCMVAC/DCIMVAC for coherency. */
-
   sam_board_initialize();
+
+#ifdef CONFIG_ARM_MPU
+  /* Mark the DMA nocache region (0x200F0000, 64 KB) as Normal,
+   * Non-cacheable so the Cortex-M7 D-cache never caches DMA descriptors
+   * or buffers placed there by sam_sqi.c, sam_sdmmc.c, sam_dmac.c.
+   * TEX=1 C=0 B=0 S=0 = Outer/Inner Non-cacheable Normal memory.
+   * PRIVDEFENA=true keeps the default memory map active for all other
+   * regions, so flash/SRAM/peripherals are unaffected.
+   */
+  mpu_configure_region((uintptr_t)_s_nocache,
+                       (size_t)(_e_nocache - _s_nocache),
+                       MPU_RASR_TEX_NOR |
+                       MPU_RASR_AP_RWRW |
+                       MPU_RASR_XN);
+  mpu_control(true, false, true);
+#endif
 
 #ifdef CONFIG_ARMV7M_ICACHE
   up_enable_icache();

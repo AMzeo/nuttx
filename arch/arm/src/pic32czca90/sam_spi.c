@@ -10,7 +10,7 @@
 
 #include <nuttx/config.h>
 
-#ifdef CONFIG_PIC32CZCA90_SERCOM3_ISSPI
+#ifdef CONFIG_PIC32CZCA90_SERCOM8_ISSPI
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -41,10 +41,10 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define SPI3_GCLK_GEN      2
-#define SPI3_GCLK_FREQ     100000000u
-#define SPI3_SERCOM        3
-#define SPI3_BASE           SAM_SERCOM3_BASE
+#define SPI8_GCLK_GEN      2
+#define SPI8_GCLK_FREQ     100000000u
+#define SPI8_SERCOM        8
+#define SPI8_BASE           SAM_SERCOM8_BASE
 
 #ifdef CONFIG_PIC32CZCA90_DMAC
 #  define SPI_DMA_THRESHOLD 4u
@@ -97,7 +97,7 @@ static uint8_t  sam_spi_status(FAR struct spi_dev_s *dev, uint32_t devid);
  * Private Data
  ****************************************************************************/
 
-static const struct spi_ops_s g_spi3_ops =
+static const struct spi_ops_s g_spi8_ops =
 {
   .lock         = sam_spi_lock,
   .select       = sam_spi_select,
@@ -111,10 +111,10 @@ static const struct spi_ops_s g_spi3_ops =
 #endif
 };
 
-static struct sam_spidev_s g_spi3_dev =
+static struct sam_spidev_s g_spi8_dev =
 {
-  .dev       = { .ops = &g_spi3_ops },
-  .base      = SPI3_BASE,
+  .dev       = { .ops = &g_spi8_ops },
+  .base      = SPI8_BASE,
   .frequency = 0,
   .actual    = 0,
   .mode      = 0,
@@ -173,13 +173,21 @@ static int sam_spi_lock(FAR struct spi_dev_s *dev, bool lock)
 static void sam_spi_select(FAR struct spi_dev_s *dev, uint32_t devid,
                            bool selected)
 {
-  pic32czca90_spi3select(dev, devid, selected);
+  pic32czca90_spi8select(dev, devid, selected);
 }
 
 static uint32_t sam_spi_setfrequency(FAR struct spi_dev_s *dev,
                                      uint32_t frequency)
 {
   FAR struct sam_spidev_s *priv = (FAR struct sam_spidev_s *)dev;
+
+  /* Cap at 8 MHz for eval board (jumper wires can't handle 24 MHz).
+   * Remove this cap for production boards with short PCB traces. */
+
+  if (frequency > 8000000u)
+    {
+      frequency = 8000000u;
+    }
 
   if (priv->actual == frequency)
     {
@@ -190,13 +198,13 @@ static uint32_t sam_spi_setfrequency(FAR struct spi_dev_s *dev,
 
   uint32_t baud;
 
-  if (frequency >= SPI3_GCLK_FREQ / 2)
+  if (frequency >= SPI8_GCLK_FREQ / 2)
     {
       baud = 0;
     }
   else
     {
-      baud = (SPI3_GCLK_FREQ / (2u * frequency)) - 1u;
+      baud = (SPI8_GCLK_FREQ / (2u * frequency)) - 1u;
       if (baud > 255)
         {
           baud = 255;
@@ -214,7 +222,7 @@ static uint32_t sam_spi_setfrequency(FAR struct spi_dev_s *dev,
   spi_putreg32(priv->base, SAM_SPI_CTRLA_OFFSET, ctrla);
   spi_wait_syncbusy(priv->base);
 
-  priv->actual = SPI3_GCLK_FREQ / (2u * (baud + 1u));
+  priv->actual = SPI8_GCLK_FREQ / (2u * (baud + 1u));
   priv->frequency = frequency;
   return priv->actual;
 }
@@ -470,38 +478,38 @@ static void sam_spi_exchange(FAR struct spi_dev_s *dev,
  * Public Functions
  ****************************************************************************/
 
-static bool g_spi3_initialized = false;
+static bool g_spi8_initialized = false;
 
 FAR struct spi_dev_s *sam_spibus_initialize(int port)
 {
-  if (port != SPI3_SERCOM)
+  if (port != SPI8_SERCOM)
     {
       return NULL;
     }
 
-  FAR struct sam_spidev_s *priv = &g_spi3_dev;
+  FAR struct sam_spidev_s *priv = &g_spi8_dev;
 
-  if (g_spi3_initialized)
+  if (g_spi8_initialized)
     {
       return &priv->dev;
     }
 
   uintptr_t base = priv->base;
 
-  /* 1. Enable MCLK APB clock for SERCOM3 */
+  /* 1. Enable MCLK APB clock for SERCOM */
 
-  sercom_enable(SPI3_SERCOM);
+  sercom_enable(SPI8_SERCOM);
 
-  /* 2. Route GCLK6 (100 MHz) to SERCOM3 core clock channel */
+  /* 2. Route GCLK6 (100 MHz) to SERCOM8 core clock channel */
 
-  sam_gclk_chan_enable(GCLK_CHAN_SERCOM3_CORE, SPI3_GCLK_GEN, false);
+  sam_gclk_chan_enable(GCLK_CHAN_SERCOM8_CORE, SPI8_GCLK_GEN, false);
 
-  /* 3. Configure GPIO pins: MOSI=PC12/PAD0, SCK=PC13/PAD1, MISO=PC15/PAD3
-   *    CS=PC14 is handled as GPIO by the board layer */
+  /* 3. Configure GPIO pins: MOSI=PD24/PAD0, SCK=PD25/PAD1, MISO=PD27/PAD3
+   *    CS=PD26 is handled as GPIO by the board layer */
 
-  sam_portconfig(PORT_SERCOM3_PAD0);  /* PC12 MOSI */
-  sam_portconfig(PORT_SERCOM3_PAD1);  /* PC13 SCK */
-  sam_portconfig(PORT_SERCOM3_PAD3);  /* PC15 MISO */
+  sam_portconfig(PORT_SERCOM8_PAD0);  /* PD24 MOSI */
+  sam_portconfig(PORT_SERCOM8_PAD1);  /* PD25 SCK */
+  sam_portconfig(PORT_SERCOM8_PAD3);  /* PD27 MISO */
 
   /* 4. Software reset */
 
@@ -529,16 +537,16 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
                SPI_CTRLA_ENABLE);
   spi_wait_syncbusy(base);
 
-  priv->actual = SPI3_GCLK_FREQ / (2u * (49u + 1u));  /* 1 MHz */
+  priv->actual = SPI8_GCLK_FREQ / (2u * (49u + 1u));  /* 1 MHz */
   priv->mode = SPIDEV_MODE0;
   priv->nbits = 8;
 
 #ifdef CONFIG_PIC32CZCA90_DMAC
   /* Allocate DMA channels for SPI RX and TX */
 
-  priv->rxflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_RX(SPI3_SERCOM)) |
+  priv->rxflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_RX(SPI8_SERCOM)) |
                   DMACH_FLAG_PRIORITY(1);
-  priv->txflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_TX(SPI3_SERCOM)) |
+  priv->txflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_TX(SPI8_SERCOM)) |
                   DMACH_FLAG_PRIORITY(1);
 
   priv->rxdma = sam_dmachannel(priv->rxflags);
@@ -546,18 +554,33 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
 
   nxsem_init(&priv->dma_wait, 0, 0);
 
-  spiinfo("SERCOM3 SPI DMA: RX=%p TX=%p (trig RX=%u TX=%u)\n",
+  spiinfo("SERCOM8 SPI DMA: RX=%p TX=%p (trig RX=%u TX=%u)\n",
           priv->rxdma, priv->txdma,
-          DMAC_TRIG_SERCOM_RX(SPI3_SERCOM),
-          DMAC_TRIG_SERCOM_TX(SPI3_SERCOM));
+          DMAC_TRIG_SERCOM_RX(SPI8_SERCOM),
+          DMAC_TRIG_SERCOM_TX(SPI8_SERCOM));
 #endif
 
-  g_spi3_initialized = true;
+  g_spi8_initialized = true;
 
-  spiinfo("SERCOM3 SPI master initialized at %lu Hz\n",
-          (unsigned long)priv->actual);
+  /* Readback diagnostic: confirm GCLK2 PCHCTRL[29] and CTRLA are live.
+   * GCLK_PCHCTRL[29] should have CHEN=1 and GEN=2.
+   * CTRLA should have ENABLE=1, MODE=3 (SPI master), DOPO=0, DIPO=3. */
+  {
+    uint32_t pchctrl29 = getreg32(SAM_GCLK_PCHCTRL(GCLK_CHAN_SERCOM8_CORE));
+    uint32_t ctrla_rb  = spi_getreg32(base, SAM_SPI_CTRLA_OFFSET);
+    uint32_t ctrlb_rb  = spi_getreg32(base, SAM_SPI_CTRLB_OFFSET);
+    uint8_t  baud_rb   = spi_getreg8(base, SAM_SPI_BAUD_OFFSET);
+    spiinfo("SPI8 hw: PCHCTRL[29]=%08" PRIx32 " CTRLA=%08" PRIx32
+            " CTRLB=%08" PRIx32 " BAUD=%u\n",
+            pchctrl29, ctrla_rb, ctrlb_rb, (unsigned)baud_rb);
+    if (!(pchctrl29 & GCLK_PCHCTRL_CHEN))
+      {
+        spierr("SPI8: GCLK2->SERCOM8_CORE not enabled! PCHCTRL[29]=%08"
+               PRIx32 "\n", pchctrl29);
+      }
+  }
 
   return &priv->dev;
 }
 
-#endif /* CONFIG_PIC32CZCA90_SERCOM3_ISSPI */
+#endif /* CONFIG_PIC32CZCA90_SERCOM8_ISSPI */

@@ -56,7 +56,7 @@ ifneq ($(CONFIG_ARCH_IDLE_CUSTOM),y)
 CHIP_CSRCS += sam_idle.c
 endif
 
-ifeq ($(CONFIG_PIC32CZCA90_SERCOM3_ISSPI),y)
+ifeq ($(CONFIG_PIC32CZCA90_SERCOM8_ISSPI),y)
 CHIP_CSRCS += sam_spi.c
 endif
 
@@ -64,7 +64,7 @@ ifeq ($(CONFIG_PIC32CZCA90_SQI1),y)
 CHIP_CSRCS += sam_sqi.c
 endif
 
-ifeq ($(CONFIG_PIC32CZCA90_SDMMC1),y)
+ifeq ($(CONFIG_PIC32CZCA90_SDMMC0),y)
 CHIP_CSRCS += sam_sdmmc.c
 endif
 

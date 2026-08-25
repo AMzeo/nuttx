@@ -5,22 +5,11 @@
  *
  * PIC32CZ CA90 SDMMC (SD/MMC Host Controller) register definitions.
  *
- * CRITICAL: Use SDMMC1 only. The micro-SD socket on the Curiosity Ultra
- * (EV16W43A) is physically wired to SDMMC1 pins:
- *   PC30=CLK, PG03=CMD, PC31=DAT0, PG00=DAT1, PG01=DAT2, PG02=DAT3, PC28=CD
- * SDMMC0 (PC08-PC15) has no SD socket connection on this board.
+ * SDMMC0 is used for the SD card (PC08-PC15, mux I=8, EXT1/EXT2 headers).
+ * SDMMC1 pins (PC30/PG00-03) are dedicated to SQI1 flash.
  *
- * SDMMC1 and SQI1 share pins (mux H=7 for SQI, mux I=8 for SDMMC).
- * Only one can own the pins at a time — see init.c for mux strategy.
- *
- * Key instance parameters for SDMMC1:
- *   SAM_SDMMC1_BASE        = 0x460A0000  (peripheral base address)
- *   SAM_SDMMC1_GCLK_ID     = 60          (main clock → GCLK4 = 100 MHz)
- *   SAM_SDMMC1_GCLK_ID_SLOW= 61          (slow clock → GCLK5 = 12 MHz)
- *   SAM_SDMMC1_MCLK_ID_AHB = 71          (MCLK AHB clock enable)
- *   SAM_SDMMC1_MCLK_ID_APB = 72          (MCLK APB clock enable)
- *   Transfer mode: ADMA2 (HC1R_DMASEL=2); no system DMA needed.
- *   Base clock freq for CCR divider: SDMMC1_BASE_CLOCK_FREQUENCY = 100000000U
+ * Transfer mode: ADMA2 (HC1R_DMASEL=2); no system DMA needed.
+ * Base clock freq for CCR divider: 100 MHz from GCLK4 (PLL0/3).
  *
  ****************************************************************************/
 
@@ -30,21 +19,33 @@
 #include "hardware/sam_memorymap.h"
 
 /* =========================================================================
- * SDMMC1 Instance Parameters
+ * SDMMC0 Instance Parameters (DFP-verified: instance/sdmmc0.h)
+ * =========================================================================
+ */
+
+#define SAM_SDMMC0_BASE          0x458A0000u
+#define SAM_SDMMC0_GCLK_ID       58          /* GCLK4 → 100 MHz main clock */
+#define SAM_SDMMC0_GCLK_ID_SLOW  59          /* GCLK5 → 12 MHz slow clock */
+#define SAM_SDMMC0_MCLK_ID_AHB   69          /* MCLK AHB enable */
+#define SAM_SDMMC0_MCLK_ID_APB   70          /* MCLK APB enable */
+
+/* =========================================================================
+ * SDMMC1 Instance Parameters (retained for reference; not used)
  * =========================================================================
  */
 
 #define SAM_SDMMC1_BASE          0x460A0000u
-#define SAM_SDMMC1_GCLK_ID       60          /* GCLK4 → 100 MHz main clock */
-#define SAM_SDMMC1_GCLK_ID_SLOW  61          /* GCLK5 → 12 MHz slow clock */
-#define SAM_SDMMC1_MCLK_ID_AHB   71          /* MCLK AHB enable */
-#define SAM_SDMMC1_MCLK_ID_APB   72          /* MCLK APB enable */
+#define SAM_SDMMC1_GCLK_ID       60
+#define SAM_SDMMC1_GCLK_ID_SLOW  61
+#define SAM_SDMMC1_MCLK_ID_AHB   71
+#define SAM_SDMMC1_MCLK_ID_APB   72
 
-/* Base clock frequency fed to SDMMC1 from GCLK4 (100 MHz).
+/* Base clock frequency fed to SDMMC from GCLK4 (100 MHz).
  * Used by CCR divider calculation: CCR_SDCLKFSEL = base_freq / (2 * sdclk) */
-#define SDMMC1_BASE_CLOCK_FREQUENCY  100000000u  /* 100 MHz */
+#define SDMMC0_BASE_CLOCK_FREQUENCY  100000000u  /* 100 MHz */
 #define SDMMC_CLOCK_FREQ_400_KHZ     400000u     /* identification phase */
-#define SDMMC_CLOCK_FREQ_25_MHZ      25000000u   /* normal speed */
+#define SDMMC_CLOCK_FREQ_5_MHZ       5000000u    /* jumper-wire safe transfer speed */
+#define SDMMC_CLOCK_FREQ_25_MHZ      25000000u   /* normal speed (PCB trace only) */
 
 /* =========================================================================
  * Register Offsets (from SDMMC base address)
@@ -87,7 +88,7 @@
 #define SAM_SDMMC_ASAR_OFFSET    0x0058  /* ADMA System Address (R/W 32) */
 #define SAM_SDMMC_SISR_OFFSET    0x00FC  /* Slot Interrupt Status (R 16) */
 #define SAM_SDMMC_HCVR_OFFSET    0x00FE  /* Host Controller Version (R 16) */
-#define SAM_SDMMC_DBGR_OFFSET    0x0200  /* Debug Register (R/W 32) — SDMMC_44002 only */
+#define SAM_SDMMC_DBGR_OFFSET    0x0234  /* Debug Register (R/W 32) — DFP DBGR_REG_OFST=0x234 */
 #define SAM_SDMMC_DEBR_OFFSET    0x0207  /* Debounce Register (R/W 8) — CA90 extension */
 #define SAM_SDMMC_CC2R_OFFSET    0x020C  /* Clock Control 2 Register (R/W 32) — CA90 extension */
 
@@ -228,7 +229,7 @@
 
 /* BASECLKF [15:8] — Base Clock Frequency for SD clock, in MHz.
  * Read by sam_set_clock() to compute CCR divider dynamically.
- * If 0, fall back to SDMMC1_BASE_CLOCK_FREQUENCY/2. */
+ * If 0 (BASECLKF_OTHER), fall back to SDMMC0_BASE_CLOCK_FREQUENCY (100 MHz). */
 #define SDMMC_CA0R_BASECLKF_Pos    8u
 #define SDMMC_CA0R_BASECLKF_Msk    (0xFFu << SDMMC_CA0R_BASECLKF_Pos)
 

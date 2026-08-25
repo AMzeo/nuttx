@@ -72,23 +72,31 @@
  *
  * PC21 (PAD0) and PC22 (PAD1) are EXT2 header pins. The PKOB4 VCP is
  * on SERCOM1 (PC04/PC07) — see above.
+ *
+ * FIXME: Was PORT_FUNC(4)=E. ATDF (PIC32CZ8110CA90208, DFP v1.7.168)
+ * says SERCOM4 PAD0/PAD1 on PC21/PC22 = function D = PORT_FUNC(3).
+ * Fixed 2026-07-14.
  * =========================================================================
  */
 
-#define PORT_SERCOM4_PAD0   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(21) | \
+#define PORT_SERCOM4_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(21) | \
                              PORT_FLAG_PMUXEN)                /* PC21 EXT2 */
-#define PORT_SERCOM4_PAD1   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(22) | \
+#define PORT_SERCOM4_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(22) | \
                              PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PC22 EXT2 */
 
 /* =========================================================================
- * SERCOM0 – PA04(TX)/PA05(RX), function D
+ * SERCOM0 – PC00(PAD0)/PC01(PAD1), function D
+ *
+ * FIXME: Was PA04/PA05. ATDF says SERCOM0 only exists on PC00-PC03 func D.
+ * PA04 func D is SERCOM2 PAD2 ioset2 — NOT SERCOM0.
+ * Fixed 2026-07-14. GPS UART will use these pins on production board.
  * =========================================================================
  */
 
-#define PORT_SERCOM0_PAD0   (PORT_PORTA | PORT_FUNC(3) | PORT_PIN(4) | \
-                             PORT_FLAG_PMUXEN)
-#define PORT_SERCOM0_PAD1   (PORT_PORTA | PORT_FUNC(3) | PORT_PIN(5) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SERCOM0_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(0) | \
+                             PORT_FLAG_PMUXEN)                /* PC00 TX */
+#define PORT_SERCOM0_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(1) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PC01 RX */
 
 /* =========================================================================
  * SERCOM2 – PC08(TX)/PC09(RX), function E (EXT1 SPI pins)
@@ -101,18 +109,33 @@
 #define PORT_SERCOM2_PAD1   (PORT_PORTC | PORT_FUNC(4) | PORT_PIN(9) | \
                              PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
 
+/* SERCOM3 ioset1 (PC12-PC15) removed — pins reassigned to SDMMC0 (mux I=8).
+ * IMU SPI moved to SERCOM8 on PD24-PD27 (Arduino J401 header).
+ *
+ * SERCOM3 ioset2 — PD03(PAD0 TX)/PD04(PAD1 RX), function D (mux index 3)
+ * ATDF-verified (PIC32CZ8110CA90208.atdf, DFP v1.7.168):
+ *   PD03 = SERCOM3/PAD[0], function D
+ *   PD04 = SERCOM3/PAD[1], function D
+ * Used for Telemetry 2 UART on production board (RMII does NOT use PD03/PD04).
+ */
+#define PORT_SERCOM3_PAD0   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(3) | \
+                             PORT_FLAG_PMUXEN)                /* PD03 TX */
+#define PORT_SERCOM3_PAD1   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(4) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PD04 RX */
+
 /* =========================================================================
- * SERCOM3 – PC12(TX)/PC13(RX), function E (EXT2 / MikroBUS SPI)
- * DS70005522C Table 2-3 MikroBUS: MOSI=PC12, SCK=PC13
+ * SERCOM7 UART — PD14(PAD0 TX)/PD15(PAD1 RX), function D (mux index 3)
+ * ATDF-verified (PIC32CZ8110CA90208.atdf, DFP v1.7.168):
+ *   PD14 = SERCOM7/PAD[0], function D
+ *   PD15 = SERCOM7/PAD[1], function D
+ * Used for RC input (SBUS/CRSF) on production board.
  * =========================================================================
  */
 
-#define PORT_SERCOM3_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(12) | \
-                             PORT_FLAG_PMUXEN)                          /* PC12 MOSI (func D=3) */
-#define PORT_SERCOM3_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(13) | \
-                             PORT_FLAG_PMUXEN)                          /* PC13 SCK (func D=3) */
-#define PORT_SERCOM3_PAD3   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(15) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PC15 MISO (func D=3) */
+#define PORT_SERCOM7_PAD0   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(14) | \
+                             PORT_FLAG_PMUXEN)                /* PD14 TX */
+#define PORT_SERCOM7_PAD1   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(15) | \
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PD15 RX */
 
 /* SERCOM5 I2C (EXT2 header) — PC25=SDA(PAD0), PC26=SCL(PAD1), mux D=3 */
 #define PORT_SERCOM5_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(25) | \
@@ -210,61 +233,105 @@
                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
 
 /* =========================================================================
- * SDMMC1 — micro-SD socket on Curiosity Ultra (EV16W43A)
+ * SDMMC0 — SD card on EXT1/EXT2 headers (direct wires to MCU)
  *
- * Peripheral function I (index 8) for SDMMC; function H (index 7) for SQI.
- * SDMMC1 and SQI1 share these physical pins — only one active at a time.
+ * Peripheral function I (index 8). All pins on Port C.
+ * DFP pio/pic32cz8110ca90208.h confirms PC08-PC15 = SDMMC0 mux I.
  *
- * DS70005522C schematic:
- *   PC30 = SDMMC1_CLK  (output only, no INEN)
- *   PG03 = SDMMC1_CMD  (bidirectional)
- *   PC31 = SDMMC1_DAT0 (bidirectional)
- *   PG00 = SDMMC1_DAT1 (bidirectional)
- *   PG01 = SDMMC1_DAT2 (bidirectional)
- *   PG02 = SDMMC1_DAT3 (bidirectional)
- *   PC28 = SDMMC1_CD   (GPIO input, active LOW, pullup)
+ *   PC08 = SDMMC0_CLK  (output only, no INEN)
+ *   PC09 = SDMMC0_DAT0 (bidirectional)
+ *   PC10 = SDMMC0_DAT1 (bidirectional)
+ *   PC11 = SDMMC0_DAT2 (bidirectional)
+ *   PC12 = SDMMC0_DAT3 (bidirectional)
+ *   PC13 = SDMMC0_CMD  (bidirectional)
+ *   PC14 = SDMMC0_WP   (tied 3.3V = not write-protected)
+ *   PC15 = SDMMC0_CD   (tied GND = always inserted, active LOW)
  * =========================================================================
  */
+
+#define PORT_SDMMC0_CLK   (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(8) | \
+                           PORT_FLAG_PMUXEN)
+#define PORT_SDMMC0_DAT0  (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(9) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_SDMMC0_DAT1  (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(10) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_SDMMC0_DAT2  (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(11) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_SDMMC0_DAT3  (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(12) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_SDMMC0_CMD   (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(13) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+#define PORT_SDMMC0_WP    (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(14) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+#define PORT_SDMMC0_CD    (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(15) | \
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
+
+/* GPIO-only CD probe — no PMUXEN, pullup HIGH.
+ * Configure this first to read physical PC15 state before touching SDMMC
+ * controller.  If HIGH = no card → skip slotinitialize entirely. */
+#define PORT_SDMMC0_CD_GPIO (PORT_PORTC | PORT_PIN(15) | \
+                             PORT_FLAG_INEN | PORT_FLAG_PULLEN | \
+                             PORT_FLAG_OUTVAL_HIGH)
+
+/* SDMMC1 pins (PC30/PG00-03) — shared with SQI1 (mux H=7 vs mux I=8).
+ * Used when SDMMC_TEST_USE_SDMMC1=1 in sam_sdmmc.c (on-board SD socket).
+ * PC28 = card-detect, active LOW, pullup. */
 
 #define PORT_SDMMC1_CLK   (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(30) | \
                            PORT_FLAG_PMUXEN)
 #define PORT_SDMMC1_CMD   (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(3)  | \
-                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
 #define PORT_SDMMC1_DAT0  (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(31) | \
-                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
 #define PORT_SDMMC1_DAT1  (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(0)  | \
-                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
 #define PORT_SDMMC1_DAT2  (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(1)  | \
-                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
 #define PORT_SDMMC1_DAT3  (PORT_PORTG | PORT_FUNC(8) | PORT_PIN(2)  | \
-                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
 #define PORT_SDMMC1_CD    (PORT_PORTC | PORT_FUNC(8) | PORT_PIN(28) | \
-                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | PORT_FLAG_PULLEN | \
-                           PORT_FLAG_OUTVAL_HIGH)
-#define PIN_SDMMC1_CD     PORT_SDMMC1_CD  /* GPIO alias — used by sam_sdmmc.c */
+                           PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                           PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH)
 
 /* =========================================================================
  * CAN3 – DS70005522C schematic, ATA6561 transceiver J701
- * PD13 = CAN3_TX (PMUX G = function 6)
- * PC29 = CAN3_RX (PMUX G = function 6)
+ * PD13 = CAN3_TX (PMUX H = function 7)
+ * PC29 = CAN3_RX (PMUX H = function 7)
+ *
+ * FIXME: Was PORT_FUNC(6)=G. ATDF says CAN3 TX/RX = function H = PORT_FUNC(7).
+ * Fixed 2026-07-14.
  * =========================================================================
  */
 
-#define PORT_CAN3_TX        (PORT_PORTD | PORT_FUNC(6) | PORT_PIN(13) | \
+#define PORT_CAN3_TX        (PORT_PORTD | PORT_FUNC(7) | PORT_PIN(13) | \
                              PORT_FLAG_PMUXEN)
-#define PORT_CAN3_RX        (PORT_PORTC | PORT_FUNC(6) | PORT_PIN(29) | \
+#define PORT_CAN3_RX        (PORT_PORTC | PORT_FUNC(7) | PORT_PIN(29) | \
                              PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
 
 /* =========================================================================
  * CAN4 – DS70005522C schematic, ATA6561 transceiver J702
- * PA31 = CAN4_TX (PMUX G = function 6)
- * PA30 = CAN4_RX (PMUX G = function 6)
+ * PA31 = CAN4_TX (PMUX H = function 7)
+ * PA30 = CAN4_RX (PMUX H = function 7)
+ *
+ * FIXME: Was PORT_FUNC(6)=G. ATDF says CAN4 TX/RX = function H = PORT_FUNC(7).
+ * Fixed 2026-07-14.
  * =========================================================================
  */
 
-#define PORT_CAN4_TX        (PORT_PORTA | PORT_FUNC(6) | PORT_PIN(31) | \
+#define PORT_CAN4_TX        (PORT_PORTA | PORT_FUNC(7) | PORT_PIN(31) | \
                              PORT_FLAG_PMUXEN)
-#define PORT_CAN4_RX        (PORT_PORTA | PORT_FUNC(6) | PORT_PIN(30) | \
+#define PORT_CAN4_RX        (PORT_PORTA | PORT_FUNC(7) | PORT_PIN(30) | \
                              PORT_FLAG_PMUXEN | PORT_FLAG_INEN)
 
 /* TCC1 Waveform Outputs WO0-WO7: PB10-PB17, function F (mux 5) */

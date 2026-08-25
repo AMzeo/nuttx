@@ -3,7 +3,7 @@
 /****************************************************************************
  * arch/arm/src/pic32czca90/sam_sdmmc.h
  *
- * Public interface for the PIC32CZ CA90 SDMMC1 driver.
+ * Public interface for the PIC32CZ CA90 SDMMC0 driver.
  ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_PIC32CZCA90_SAM_SDMMC_H
@@ -30,48 +30,46 @@ extern "C"
 #endif
 
 /****************************************************************************
- * Name: sam_sdmmc1_initialize
+ * Name: sam_sdmmc0_initialize
  *
  * Description:
- *   Initialize SDMMC1 for SD card access.  Enables GCLK4 (100 MHz main
+ *   Initialize SDMMC0 for SD card access.  Enables GCLK4 (100 MHz main
  *   clock), GCLK5 (12 MHz slow clock), and MCLK AHB/APB gates.  Configures
- *   the card-detect GPIO (PC28, active LOW).
+ *   the card-detect GPIO (PC15, active LOW, tied to GND = always inserted).
  *
  * Returned Value:
  *   Pointer to the SDIO device handle, or NULL on failure.
  *
  ****************************************************************************/
 
-EXTERN struct sdio_dev_s *sam_sdmmc1_initialize(void);
+EXTERN struct sdio_dev_s *sam_sdmmc0_initialize(void);
 
 /****************************************************************************
- * Name: sam_sdmmc1_slotinitialize
+ * Name: sam_sdmmc0_slotinitialize
  *
  * Description:
- *   Combined SDMMC1 hardware init + mmcsd_slotinitialize().  Call this from
- *   board_app_initialize() instead of sam_sdmmc1_initialize()+mmcsd_slotinitialize()
- *   separately.  Placing both calls in the chip layer (libarch.a) ensures
- *   mmcsd_sdio.o is pulled into the --start-group linker block where up_udelay
- *   is available (SAMV7 chip-layer pattern).
+ *   Combined SDMMC0 hardware init + mmcsd_slotinitialize().  Call this from
+ *   board_app_initialize() instead of sam_sdmmc0_initialize()+mmcsd_slotinitialize()
+ *   separately.
  *
  * Returned Value:
  *   OK on success; negative errno on failure.
  *
  ****************************************************************************/
 
-EXTERN int sam_sdmmc1_slotinitialize(int minor);
+EXTERN int sam_sdmmc0_slotinitialize(int minor);
 
 /****************************************************************************
- * Name: sdmmc1_clk_enable
+ * Name: sdmmc0_clk_enable
  *
  * Description:
- *   Enable GCLK4 / GCLK5 and MCLK AHB / APB gates for SDMMC1.
- *   Called from sam_sdmmc1_initialize(); may also be called after a
+ *   Enable GCLK4 / GCLK5 and MCLK AHB / APB gates for SDMMC0.
+ *   Called from sam_sdmmc0_initialize(); may also be called after a
  *   deep-sleep resume to re-enable clocks before the first transfer.
  *
  ****************************************************************************/
 
-EXTERN void sdmmc1_clk_enable(void);
+EXTERN void sdmmc0_clk_enable(void);
 
 /****************************************************************************
  * Name: sam_sdmmc_set_sdio_card_isr

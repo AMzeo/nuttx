@@ -185,6 +185,26 @@ config PIC32CZCA90_SQI1
 	select PIC32CZCA90_SQI
 	select SPI
 
+config PIC32CZCA90_SDMMC0
+	bool "SDMMC0 (SD/MMC Host Controller 0)"
+	default n
+	select MMCSD_SDIO
+	select SDIO_BLOCKSETUP
+
+config PIC32CZCA90_SDMMC0_DMA
+	bool "SDMMC0 ADMA2 DMA transfers"
+	default y
+	depends on PIC32CZCA90_SDMMC0
+	select SDIO_DMA
+	---help---
+		Enable ADMA2 descriptor-based DMA for SDMMC0 transfers.
+		Disable to fall back to PIO (interrupt-driven) for DMA debugging.
+
+config PIC32CZCA90_SDMMC0_WIDTH_D1_D4
+	bool "SDMMC0 4-bit data bus"
+	default y
+	depends on PIC32CZCA90_SDMMC0
+
 config PIC32CZCA90_SDMMC1
 	bool "SDMMC1 (SD/MMC Host Controller 1)"
 	default n

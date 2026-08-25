@@ -37,16 +37,18 @@
 FAR struct spi_dev_s *sam_spibus_initialize(int port);
 
 /****************************************************************************
- * Name: pic32czca90_spi3select
+ * Name: pic32czca90_spi8select / pic32czca90_spi8status
  *
  * Description:
- *   Board-level chip select for SERCOM3 SPI bus.
- *   Must be provided by the board (boards/.../src/spi.c).
+ *   Board-level chip select and status for SERCOM8 SPI bus.
+ *   Must be provided by the board (boards/.../src/spi.cpp).
  *
  ****************************************************************************/
 
-void pic32czca90_spi3select(FAR struct spi_dev_s *dev, uint32_t devid,
+void pic32czca90_spi8select(FAR struct spi_dev_s *dev, uint32_t devid,
                             bool selected);
+
+uint8_t pic32czca90_spi8status(FAR struct spi_dev_s *dev, uint32_t devid);
 
 #endif /* __ASSEMBLY__ */
 #endif /* __ARCH_ARM_SRC_PIC32CZCA90_SAM_SPI_H */

@@ -19,6 +19,7 @@
 
 #include "arm_internal.h"
 #include "hardware/sam_pm.h"
+#include "hardware/sam_port.h"
 #include "sam_config.h"
 #include "sam_gclk.h"
 #include "sam_sercom.h"
@@ -360,15 +361,60 @@ void sam_usart_reset(const struct sam_usart_config_s * const config)
  *
  ****************************************************************************/
 
+/* DIAGNOSTIC: no-debugger stall probe.  If any wait below never completes,
+ * we cannot tell from a dead console whether execution is still alive.
+ * Instead of spinning forever, give up after a bounded number of iterations
+ * and blink LED1 directly via raw GPIO (bypassing UART and work queues
+ * entirely) so the stall is visible on hardware with no debugger attached.
+ * Bypasses PORT_LED1 GPIO define since board_config.h is not included here;
+ * PB22 (LED1) direct register poke, active LOW.
+ */
+#define SAM_LOWPUTC_STALL_LIMIT   3000000u
+#define LED1_PB22_MASK            (1u << 22)
+
+static void sam_lowputc_stall_signal(void)
+{
+  volatile uint32_t *outtgl =
+    (volatile uint32_t *)(SAM_PORTB_BASE + SAM_PORT_OUTTGL_OFFSET);
+  int i;
+  int j;
+
+  for (i = 0; i < 10; i++)
+    {
+      *outtgl = LED1_PB22_MASK;
+
+      for (j = 0; j < 200000; j++)
+        {
+          __asm__ volatile ("nop");
+        }
+    }
+}
+
 #ifdef HAVE_SERIAL_CONSOLE
 void sam_lowputc(uint32_t ch)
 {
   uintptr_t base    = g_consoleconfig.base;
   uintptr_t intflag = base + SAM_USART_INTFLAG_OFFSET;
+  uint32_t  stall;
+
+  /* DIAGNOSTIC: critical-section wrap removed again (ruled out as an
+   * ISR-race fix by an earlier hardware test) so this poll loop no longer
+   * disables interrupts. This lets us tell whether a later hang here is a
+   * genuine DRE/TXC-never-asserts stall vs. an artifact of spinning with
+   * interrupts off (which would also freeze the LPWORK heartbeat).
+   */
 
   /* Wait for the USART to be ready for new TX data */
 
-  while ((getreg8(intflag) & USART_INT_DRE) == 0);
+  stall = 0;
+  while ((getreg8(intflag) & USART_INT_DRE) == 0)
+    {
+      if (++stall > SAM_LOWPUTC_STALL_LIMIT)
+        {
+          sam_lowputc_stall_signal();
+          return;
+        }
+    }
 
   /* Wait until synchronization is complete */
 
@@ -380,7 +426,15 @@ void sam_lowputc(uint32_t ch)
 
   /* Wait until data is sent */
 
-  while ((getreg8(intflag) & USART_INT_TXC) == 0);
+  stall = 0;
+  while ((getreg8(intflag) & USART_INT_TXC) == 0)
+    {
+      if (++stall > SAM_LOWPUTC_STALL_LIMIT)
+        {
+          sam_lowputc_stall_signal();
+          return;
+        }
+    }
 }
 #endif
 
