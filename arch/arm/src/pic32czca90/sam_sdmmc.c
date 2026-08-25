@@ -1162,11 +1162,11 @@ static void sam_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
 
     case CLOCK_MMC_TRANSFER:
     case CLOCK_SD_TRANSFER_1BIT:
-      sam_set_clock(priv, SDMMC_CLOCK_FREQ_400_KHZ);
+      sam_set_clock(priv, SDMMC_CLOCK_FREQ_5_MHZ);
       break;
 
     case CLOCK_SD_TRANSFER_4BIT:
-      sam_set_clock(priv, SDMMC_CLOCK_FREQ_400_KHZ);
+      sam_set_clock(priv, SDMMC_CLOCK_FREQ_5_MHZ);
       break;
     }
 }
