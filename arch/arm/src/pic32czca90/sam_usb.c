@@ -175,6 +175,11 @@ struct sam_usbdev_s
   volatile uint32_t            dbg_epn_rx;
   volatile uint32_t            dbg_epn_rx_noreq;
   volatile uint32_t            dbg_epn_rx_bytes;
+  volatile uint32_t            dbg_ep3_rx;         /* EP3 (CDC bulk OUT) RX events */
+  volatile uint32_t            dbg_ep3_rx_bytes;   /* EP3 bytes received */
+  volatile uint8_t             dbg_ep3_sizes[16];  /* ring: last 16 EP3 packet sizes */
+  volatile uint8_t             dbg_ep3_stx[16];    /* ring: first byte of each EP3 packet */
+  volatile uint8_t             dbg_ep3_size_idx;   /* ring write pointer (mod 16) */
   volatile uint32_t            dbg_epn_tx;
   volatile uint32_t            dbg_epn_tx_done;
 
@@ -363,20 +368,17 @@ static void sam_fifo_write(uint8_t epno, const uint8_t *buf, uint16_t len)
 
 static void sam_fifo_read(uint8_t epno, uint8_t *buf, uint16_t len)
 {
-  volatile uint32_t *fifo32 = (volatile uint32_t *)SAM_USBHS0_FIFO(epno);
-  volatile uint8_t  *fifo8  = (volatile uint8_t *)SAM_USBHS0_FIFO(epno);
+  /* Harmony byte-lane model: FIFO is a 4-byte window; lane N = byte N of
+   * current word.  Word advances only after lane 3 is read.  Use (i & 3U)
+   * to cycle lanes 0-1-2-3-0-1-2-3, matching USBHS_DeviceEPFIFOUnload_Default.
+   * A plain *fifo8 loop (always lane 0) never advances past byte 0, corrupting
+   * bytes 33-34 of 35-byte packets (PARAM_SET CRC) ~99.6% of the time.
+   */
 
-  while (len >= 4)
+  volatile uint8_t *fifo = (volatile uint8_t *)SAM_USBHS0_FIFO(epno);
+  for (uint16_t i = 0; i < len; i++)
     {
-      uint32_t val = *fifo32;
-      memcpy(buf, &val, 4);
-      buf += 4;
-      len -= 4;
-    }
-
-  while (len--)
-    {
-      *buf++ = *fifo8;
+      buf[i] = *(fifo + (i & 3U));
     }
 }
 
@@ -913,13 +915,13 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
                */
 
               ep0_trace(priv, T_CLASS, csr0l, priv->ep0state, breq);
-              leave_critical_section(flags);
               if (priv->driver)
                 {
                   CLASS_SETUP(priv->driver, &priv->usbdev,
                               &ctrl, priv->ep0buf, wlength);
                 }
 
+              leave_critical_section(flags);
               return;
             }
           else if (wlength == 0)
@@ -959,13 +961,13 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
                   sam_putreg8(USBHS_CSR0L_SVCRXPKTRDY, SAM_USBHS0_CSR0L);
 
                   ep0_trace(priv, T_CLASS, csr0l, priv->ep0state, breq);
-                  leave_critical_section(flags);
                   if (priv->driver)
                     {
                       CLASS_SETUP(priv->driver, &priv->usbdev,
                                   &ctrl, priv->ep0buf, 0);
                     }
 
+                  leave_critical_section(flags);
                   return;
                 }
             }
@@ -1160,6 +1162,12 @@ static void sam_epn_rx_interrupt(struct sam_usbdev_s *priv, uint8_t epno)
       priv->dbg_epn_rx_bytes += count;
     }
 
+  if (epno == 3)
+    {
+      priv->dbg_ep3_rx++;
+      priv->dbg_ep3_rx_bytes += count;
+    }
+
   if (privreq && count > 0)
     {
       uint16_t remaining = privreq->req.len - privreq->req.xfrd;
@@ -1167,6 +1175,16 @@ static void sam_epn_rx_interrupt(struct sam_usbdev_s *priv, uint8_t epno)
 
       sam_fifo_read(epno, (uint8_t *)privreq->req.buf + privreq->req.xfrd,
                     nbytes);
+
+      if (epno == 3 && nbytes > 0)
+        {
+          uint8_t ridx = priv->dbg_ep3_size_idx & 0x0f;
+          priv->dbg_ep3_sizes[ridx] = (nbytes > 255) ? 255 : (uint8_t)nbytes;
+          priv->dbg_ep3_stx[ridx] =
+            ((uint8_t *)privreq->req.buf)[privreq->req.xfrd];
+          priv->dbg_ep3_size_idx++;
+        }
+
       privreq->req.xfrd += nbytes;
 
       /* Clear RXPKTRDY */
@@ -1965,6 +1983,14 @@ struct ep0_trace_entry *sam_usb_ep0_trace(void)
 uint8_t sam_usb_ep0_trace_idx(void)
 {
   return g_usbdev.ep0_trace_idx;
+}
+
+void sam_usb_ep3_sizes(volatile uint8_t **sizes, volatile uint8_t **stx,
+                       volatile uint8_t **idx)
+{
+  *sizes = g_usbdev.dbg_ep3_sizes;
+  *stx   = g_usbdev.dbg_ep3_stx;
+  *idx   = &g_usbdev.dbg_ep3_size_idx;
 }
 
 void arm_usbinitialize(void)

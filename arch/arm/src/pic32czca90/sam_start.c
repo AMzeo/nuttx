@@ -134,7 +134,7 @@ void __start(void)
   sam_board_initialize();
 
 #ifdef CONFIG_ARM_MPU
-  /* Mark the DMA nocache region (0x200F0000, 64 KB) as Normal,
+  /* Mark the DMA nocache region (0x20110000, 64 KB) as Normal,
    * Non-cacheable so the Cortex-M7 D-cache never caches DMA descriptors
    * or buffers placed there by sam_sqi.c, sam_sdmmc.c, sam_dmac.c.
    * TEX=1 C=0 B=0 S=0 = Outer/Inner Non-cacheable Normal memory.

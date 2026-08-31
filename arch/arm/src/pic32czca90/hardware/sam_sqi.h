@@ -13,7 +13,7 @@
  *   No APB clock — SQI uses AHB bus only.
  *
  * BD descriptor structs must be placed in the nocache MPU region
- * (linker-reserved at 0x200F0000).
+ * (linker-reserved at 0x20110000).
  *
  ****************************************************************************/
 
@@ -447,7 +447,7 @@
 /* =========================================================================
  * BD Descriptor Structure
  *
- * Must be placed in the nocache MPU region (0x200F0000) to avoid D-cache
+ * Must be placed in the nocache MPU region (0x20110000) to avoid D-cache
  * coherency issues. Total size: 32 bytes (includes 16-byte alignment pad).
  *
  * Cache rules:
