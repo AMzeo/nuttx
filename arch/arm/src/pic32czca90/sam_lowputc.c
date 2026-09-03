@@ -306,17 +306,26 @@ int sam_usart_initialize(const struct sam_usart_config_s * const config)
   irqstate_t flags;
   int ret;
 
-  /* Reset the SERCOM so that we know that it is in its initial state */
+  /* Enable GCLK and APB clocks before reset or configure.
+   * sam_usart_reset() reads CTRLA to poll SWRST; if APB is not yet
+   * enabled the read returns 0xFFFFFFFF and the loop never exits.
+   * Both calls are idempotent. */
 
-  flags = enter_critical_section();
+  sercom_coreclk_configure(config->sercom, config->coregen,
+                           (bool)config->corelock);
+  sercom_enable(config->sercom);
+
+  /* Reset outside critical section: SWRST poll can take several
+   * microseconds.  Holding PRIMASK=1 that long starves the console
+   * SERCOM1 DRE interrupt and deadlocks any concurrent task waiting
+   * to print (e.g. mavlink task printing while RC driver initializes). */
+
   sam_usart_reset(config);
 
-  /* Just invoke the internal implementation, but with interrupts disabled
-   * so that the operation is atomic.
-   */
-
+  flags = enter_critical_section();
   ret = sam_usart_internal(config);
   leave_critical_section(flags);
+
   return ret;
 }
 #endif

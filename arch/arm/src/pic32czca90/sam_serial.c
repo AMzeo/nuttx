@@ -19,6 +19,9 @@
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
+#ifdef CONFIG_SERIAL_TERMIOS
+#  include <termios.h>
+#endif
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
@@ -569,22 +572,14 @@ static int sam_interrupt(int irq, void *context, void *arg)
   DEBUGASSERT(dev != NULL && dev->priv != NULL);
   priv = (struct sam_dev_s *)dev->priv;
 
-  /* Get the set of pending USART interrupts (we are only interested in the
-   * unmasked interrupts).
-   */
-
   intflag = sam_serialin8(priv, SAM_USART_INTFLAG_OFFSET);
   inten   = sam_serialin8(priv, SAM_USART_INTENCLR_OFFSET);
   pending = intflag & inten;
-
-  /* Handle an incoming, receive byte */
 
   if ((pending & USART_INT_RXC) != 0)
     {
       uart_recvchars(dev);
     }
-
-  /* Handle outgoing, transmit bytes */
 
   if ((pending & USART_INT_DRE) != 0)
     {
@@ -654,11 +649,10 @@ static void sam_detach(struct uart_dev_s *dev)
 
 static int sam_ioctl(struct file *filep, int cmd, unsigned long arg)
 {
-#ifdef CONFIG_SERIAL_TIOCSERGSTRUCT
   struct inode      *inode = filep->f_inode;
   struct uart_dev_s *dev   = inode->i_private;
-#endif
-  int                ret    = OK;
+  struct sam_dev_s  *priv  = (struct sam_dev_s *)dev->priv;
+  int                ret   = OK;
 
   switch (cmd)
     {
@@ -677,6 +671,88 @@ static int sam_ioctl(struct file *filep, int cmd, unsigned long arg)
        }
        break;
 #endif
+
+#ifdef CONFIG_SERIAL_TERMIOS
+    case TCGETS:
+      {
+        struct termios *termiosp = (struct termios *)arg;
+        uint16_t baud_reg;
+        uint32_t baud;
+
+        if (!termiosp)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
+        /* Reverse-calculate baud from current BAUD register value */
+
+        baud_reg = getreg16(priv->config->base + SAM_USART_BAUD_OFFSET);
+        baud = (uint32_t)(((uint64_t)(65536u - baud_reg) *
+                           priv->config->frequency) >> 20);
+
+        cfsetispeed(termiosp, baud);
+        cfsetospeed(termiosp, baud);
+
+        termiosp->c_cflag =
+          ((priv->config->parity != 0) ? PARENB : 0) |
+          ((priv->config->parity == 1) ? PARODD : 0) |
+          ((priv->config->stopbits2)   ? CSTOPB : 0) |
+          CS8;
+      }
+      break;
+
+    case TCSETS:
+      {
+        struct termios *termiosp = (struct termios *)arg;
+        uint32_t baud;
+        uint64_t tmp;
+        uint16_t baud_reg;
+        uint32_t ctrla;
+
+        if (!termiosp)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
+        baud = cfgetispeed(termiosp);
+        if (baud == 0)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
+        /* BAUD = 65536 - (baud << 20) / frequency  (same formula as sam_usart_configure) */
+
+        tmp = (uint64_t)baud << 20;
+        tmp = (tmp + (priv->config->frequency >> 1)) / priv->config->frequency;
+        if (tmp < 1 || tmp > (uint64_t)UINT16_MAX)
+          {
+            ret = -ERANGE;
+            break;
+          }
+
+        baud_reg = (uint16_t)(65536u - (uint16_t)tmp);
+
+        /* BAUD register is enable-protected: disable → write → re-enable */
+
+        ctrla = getreg32(priv->config->base + SAM_USART_CTRLA_OFFSET);
+        putreg32(ctrla & ~USART_CTRLA_ENABLE,
+                 priv->config->base + SAM_USART_CTRLA_OFFSET);
+        while (getreg32(priv->config->base + SAM_USART_SYNCBUSY_OFFSET) &
+               USART_SYNCBUSY_ENABLE);
+
+        putreg16(baud_reg, priv->config->base + SAM_USART_BAUD_OFFSET);
+
+        putreg32(ctrla, priv->config->base + SAM_USART_CTRLA_OFFSET);
+        while (getreg32(priv->config->base + SAM_USART_SYNCBUSY_OFFSET) &
+               USART_SYNCBUSY_ENABLE);
+
+        ret = OK;
+      }
+      break;
+#endif /* CONFIG_SERIAL_TERMIOS */
 
     default:
       ret = -ENOTTY;
