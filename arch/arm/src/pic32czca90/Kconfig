@@ -237,6 +237,17 @@ config PIC32CZCA90_EIC
 	bool "External Interrupt Controller"
 	default n
 
+config PIC32CZCA90_PROGMEM
+	bool "Program Flash MTD (FCW progmem — crash log)"
+	default n
+	select ARCH_HAVE_PROGMEM
+
+config PIC32CZCA90_PROGMEM_NPAGES
+	int "Number of 4 KB pages to reserve at top of PFM for crash log"
+	default 2
+	range 2 16
+	depends on PIC32CZCA90_PROGMEM
+
 config PIC32CZCA90_NVMCTRL
 	bool "Non-Volatile Memory Controller"
 	default n

@@ -181,15 +181,16 @@ static uint32_t sam_spi_setfrequency(FAR struct spi_dev_s *dev,
 {
   FAR struct sam_spidev_s *priv = (FAR struct sam_spidev_s *)dev;
 
-  /* Cap at 8 MHz for eval board (jumper wires can't handle 24 MHz).
-   * Remove this cap for production boards with short PCB traces. */
+  /* Cap at 2 MHz for eval board (Mikroe Click connector + jumper wires).
+   * MISO pull-up (PORT_FLAG_PULLEN on PD27) counteracts Click SDO pull-down,
+   * allowing reliable operation at 2 MHz. Remove for production PCB traces. */
 
-  if (frequency > 8000000u)
+  if (frequency > 2000000u)
     {
-      frequency = 8000000u;
+      frequency = 2000000u;
     }
 
-  if (priv->actual == frequency)
+  if (priv->frequency == frequency)
     {
       return priv->actual;
     }
@@ -392,8 +393,10 @@ static void sam_spi_exchange_dma(FAR struct sam_spidev_s *priv,
       sam_dmatxsetup(priv->txdma, paddr, (uint32_t)&g_spi_dummy_tx, nwords);
     }
 
-  /* Start transfers: RX first (must be ready before TX clocks data in) */
+  /* Start transfers: RX first (must be ready before TX clocks data in).
+   * Drain any stale post from a prior watchdog/callback race before arming. */
 
+  while (nxsem_trywait(&priv->dma_wait) == OK) {}
   priv->dma_result = -EBUSY;
   sam_dmastart(priv->rxdma, spi_rxcallback, priv);
   sam_dmastart(priv->txdma, spi_txcallback, priv);
@@ -500,7 +503,7 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
 
   sercom_enable(SPI8_SERCOM);
 
-  /* 2. Route GCLK6 (100 MHz) to SERCOM8 core clock channel */
+  /* 2. Route GCLK2 (100 MHz) to SERCOM8 core clock channel (GCLK_PCHCTRL[29]) */
 
   sam_gclk_chan_enable(GCLK_CHAN_SERCOM8_CORE, SPI8_GCLK_GEN, false);
 
@@ -522,10 +525,10 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
                SPI_CTRLB_CHSIZE_8BIT | SPI_CTRLB_RXEN);
   spi_wait_syncbusy(base);
 
-  /* 6. Set baud: default 1 MHz = GCLK/(2*(BAUD+1))
-   *    100 MHz / (2*50) = 1 MHz → BAUD=49 */
+  /* 6. Set baud: default 2 MHz = GCLK/(2*(BAUD+1))
+   *    100 MHz / (2*25) = 2 MHz → BAUD=24 */
 
-  spi_putreg8(base, SAM_SPI_BAUD_OFFSET, 49);
+  spi_putreg8(base, SAM_SPI_BAUD_OFFSET, 24);
 
   /* 7. Configure CTRLA: SPI master, DOPO=PAD0 (MOSI=PAD0, SCK=PAD1),
    *    DIPO=PAD3 (MISO=PAD3), CPOL=0, CPHA=0, MSB first, ENABLE */
@@ -537,7 +540,7 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
                SPI_CTRLA_ENABLE);
   spi_wait_syncbusy(base);
 
-  priv->actual = SPI8_GCLK_FREQ / (2u * (49u + 1u));  /* 1 MHz */
+  priv->actual = SPI8_GCLK_FREQ / (2u * (24u + 1u));  /* 2 MHz */
   priv->mode = SPIDEV_MODE0;
   priv->nbits = 8;
 
@@ -545,14 +548,15 @@ FAR struct spi_dev_s *sam_spibus_initialize(int port)
   /* Allocate DMA channels for SPI RX and TX */
 
   priv->rxflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_RX(SPI8_SERCOM)) |
-                  DMACH_FLAG_PRIORITY(1);
+                  DMACH_FLAG_PRIORITY(0);
   priv->txflags = DMACH_FLAG_PERIPHPID(DMAC_TRIG_SERCOM_TX(SPI8_SERCOM)) |
-                  DMACH_FLAG_PRIORITY(1);
+                  DMACH_FLAG_PRIORITY(0);
 
   priv->rxdma = sam_dmachannel(priv->rxflags);
   priv->txdma = sam_dmachannel(priv->txflags);
 
   nxsem_init(&priv->dma_wait, 0, 0);
+  nxsem_set_protocol(&priv->dma_wait, SEM_PRIO_NONE);
 
   spiinfo("SERCOM8 SPI DMA: RX=%p TX=%p (trig RX=%u TX=%u)\n",
           priv->rxdma, priv->txdma,

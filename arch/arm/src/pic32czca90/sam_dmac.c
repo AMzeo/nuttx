@@ -103,9 +103,9 @@ static void sam_dma_terminate(struct sam_dmach_s *dmach, int result)
   dma_callback_t callback;
   void *arg;
 
-  /* Disable all channel interrupts */
+  /* Disable all channel interrupts (CHINTENCLR only has bits 0-5 per DFP) */
 
-  dmach_putreg(dmach, SAM_DMACH_INTENCLR_OFFSET, DMA_CHINTF_ALL);
+  dmach_putreg(dmach, SAM_DMACH_INTENCLR_OFFSET, 0x0000003Fu);
 
   /* Disable channel and wait for hardware to confirm */
 
@@ -205,7 +205,7 @@ static int sam_dma_interrupt(int irq, void *context, void *arg)
 
       dmach_putreg(dmach, SAM_DMACH_INTF_OFFSET, chintf);
 
-      if (chintf & DMA_CHINTF_ERRORS)
+      if (chintf & (DMA_CHINTF_ERRORS | DMA_CHINTF_TA))
         {
           sam_dma_terminate(dmach, -EIO);
         }
@@ -276,7 +276,7 @@ void weak_function arm_dma_initialize(void)
       /* Ensure channel is disabled and interrupts cleared */
 
       dmach_putreg(&g_dmach[ch], SAM_DMACH_CTRLA_OFFSET, 0);
-      dmach_putreg(&g_dmach[ch], SAM_DMACH_INTENCLR_OFFSET, DMA_CHINTF_ALL);
+      dmach_putreg(&g_dmach[ch], SAM_DMACH_INTENCLR_OFFSET, 0x0000003Fu);
       dmach_putreg(&g_dmach[ch], SAM_DMACH_INTF_OFFSET, DMA_CHINTF_ALL);
     }
 
@@ -369,6 +369,18 @@ int sam_dmarxsetup(DMA_HANDLE handle, uint32_t paddr, uint32_t maddr,
   DEBUGASSERT(dmach && dmach->inuse && !dmach->busy);
   DEBUGASSERT(nbytes > 0 && nbytes <= 65535);
 
+  /* CHCTRLB/SSA/DSA/XSIZ are write-protected when CHCTRLA.ENABLE=1.
+   * After a CPU reset, hardware ENABLE may persist from the previous boot.
+   * Disable with readback wait before writing any transfer parameters. */
+
+  if (dmach_getreg(dmach, SAM_DMACH_CTRLA_OFFSET) & DMA_CHCTRLA_ENABLE)
+    {
+      dmach_putreg(dmach, SAM_DMACH_CTRLA_OFFSET, 0);
+      while (dmach_getreg(dmach, SAM_DMACH_CTRLA_OFFSET) & DMA_CHCTRLA_ENABLE)
+        {
+        }
+    }
+
   uint32_t trig = (dmach->flags & DMACH_FLAG_PERIPHPID_MASK) >>
                    DMACH_FLAG_PERIPHPID_SHIFT;
   uint32_t pri  = (dmach->flags & DMACH_FLAG_PRIORITY_MASK) >>
@@ -421,6 +433,16 @@ int sam_dmatxsetup(DMA_HANDLE handle, uint32_t paddr, uint32_t maddr,
 
   DEBUGASSERT(dmach && dmach->inuse && !dmach->busy);
   DEBUGASSERT(nbytes > 0 && nbytes <= 65535);
+
+  /* CHCTRLB/SSA/DSA/XSIZ are write-protected when CHCTRLA.ENABLE=1. */
+
+  if (dmach_getreg(dmach, SAM_DMACH_CTRLA_OFFSET) & DMA_CHCTRLA_ENABLE)
+    {
+      dmach_putreg(dmach, SAM_DMACH_CTRLA_OFFSET, 0);
+      while (dmach_getreg(dmach, SAM_DMACH_CTRLA_OFFSET) & DMA_CHCTRLA_ENABLE)
+        {
+        }
+    }
 
   uint32_t trig = (dmach->flags & DMACH_FLAG_PERIPHPID_MASK) >>
                    DMACH_FLAG_PERIPHPID_SHIFT;
@@ -484,10 +506,12 @@ int sam_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg)
 
   dmach_putreg(dmach, SAM_DMACH_INTF_OFFSET, DMA_CHINTF_ALL);
 
-  /* Enable Block Complete + error interrupts */
+  /* Enable Block Complete + Transfer Abort interrupts.
+   * WRE/RDE (bits 17-18) are not in CHINTENSET mask per DFP — always fire
+   * into INTSTATn unconditionally and are checked via CHINTF in the ISR. */
 
   dmach_putreg(dmach, SAM_DMACH_INTENSET_OFFSET,
-               DMA_CHINTF_BC | DMA_CHINTF_WRE | DMA_CHINTF_RDE);
+               DMA_CHINTF_BC | DMA_CHINTF_TA);
 
   /* Memory barriers before enabling channel */
 
@@ -535,6 +559,9 @@ size_t sam_dmaresidual(DMA_HANDLE handle)
 
   DEBUGASSERT(dmach && dmach->inuse);
 
-  uint32_t xsiz = dmach_getreg(dmach, SAM_DMACH_XSIZ_OFFSET);
-  return (size_t)((xsiz & DMA_CHXSIZ_BLKSZ_MASK) >> DMA_CHXSIZ_BLKSZ_SHIFT);
+  uint32_t xsiz   = dmach_getreg(dmach, SAM_DMACH_XSIZ_OFFSET);
+  uint32_t statbc = dmach_getreg(dmach, SAM_DMACH_STATBC_OFFSET);
+  uint32_t blksz  = (xsiz & DMA_CHXSIZ_BLKSZ_MASK) >> DMA_CHXSIZ_BLKSZ_SHIFT;
+  uint32_t bbtc   = statbc & DMA_CHSTATBC_BBTC_MASK;
+  return (size_t)(blksz > bbtc ? blksz - bbtc : 0);
 }

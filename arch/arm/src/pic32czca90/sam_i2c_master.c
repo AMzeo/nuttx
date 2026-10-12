@@ -7,8 +7,8 @@
  * Architecture: NuttX semaphore-wait + ISR state machine.
  *   - MB fires after address/data byte transmitted (write path)
  *   - SB fires after data byte received (read path)
- *   - SMEN auto-ACK on DATA read for non-last bytes
- *   - CMD=3+ACKACT=1 for last byte (NACK+STOP)
+ *   - SMEN=1: reading DATA auto-ACKs non-last bytes; set ACKACT before read for last byte
+ *   - CMD=STOP+ACKACT=1 before reading last byte (NACK+STOP)
  *
  ****************************************************************************/
 
@@ -31,6 +31,7 @@
 #include <syslog.h>
 
 #include "arm_internal.h"
+#include "barriers.h"
 #include "nvic.h"
 #include "sam_port.h"
 #include "sam_sercom.h"
@@ -173,33 +174,33 @@ static void i2c_bus_recover(void)
 
   putreg32(sda_mask, port + SAM_PORT_DIRCLR_OFFSET);
 
-  /* Check if SDA is already high — bus is fine, skip recovery */
-
   for (delay = 0; delay < 500; delay++);
-  if (getreg32(port + SAM_PORT_IN_OFFSET) & sda_mask)
+
+  /* Only clock SCL if SDA is physically stuck LOW */
+
+  if (!(getreg32(port + SAM_PORT_IN_OFFSET) & sda_mask))
     {
-      return;  /* Bus OK — pins will be reconfigured by caller */
-    }
+      /* 72 clocks = enough to drain up to 8 bytes (multi-byte reads).
+       * Stop as soon as SDA goes HIGH (slave releases after byte+NACK). */
 
-  /* SDA is stuck LOW — clock SCL 9 times to free slave */
-
-  for (int i = 0; i < 9; i++)
-    {
-      putreg32(scl_mask, port + SAM_PORT_OUTCLR_OFFSET);
-      for (delay = 0; delay < 1500; delay++);  /* ~5 µs at 300 MHz */
-
-      putreg32(scl_mask, port + SAM_PORT_OUTSET_OFFSET);
-      for (delay = 0; delay < 1500; delay++);
-
-      /* Check if slave released SDA */
-
-      if (getreg32(port + SAM_PORT_IN_OFFSET) & sda_mask)
+      for (int i = 0; i < 72; i++)
         {
-          break;
+          putreg32(scl_mask, port + SAM_PORT_OUTCLR_OFFSET);
+          for (delay = 0; delay < 1500; delay++);  /* ~5 µs at 300 MHz */
+
+          putreg32(scl_mask, port + SAM_PORT_OUTSET_OFFSET);
+          for (delay = 0; delay < 1500; delay++);
+
+          if (getreg32(port + SAM_PORT_IN_OFFSET) & sda_mask)
+            {
+              break;
+            }
         }
     }
 
-  /* Generate STOP: SDA low→high while SCL is high */
+  /* Always generate STOP — resets slave state machine after any reboot.
+   * Previous code returned early when SDA was already HIGH, skipping this,
+   * leaving the slave's internal state machine confused after a soft reboot. */
 
   putreg32(sda_mask, port + SAM_PORT_OUTCLR_OFFSET);
   putreg32(sda_mask, port + SAM_PORT_DIRSET_OFFSET);  /* SDA = output LOW */
@@ -266,6 +267,7 @@ static void i2c_start_next_msg(FAR struct sam_i2cdev_s *priv)
           uint32_t paddr = base + SAM_I2C_DATA_OFFSET;
           uint32_t maddr = (uint32_t)priv->msg->buffer;
 
+          sam_dmastop(priv->rxdma);  /* clear stale hardware enable from previous boot */
           sam_dmarxsetup(priv->rxdma, paddr, maddr, dma_len);
           sam_dmastart(priv->rxdma, i2c_dma_callback, priv);
           priv->dma_active = true;
@@ -288,9 +290,41 @@ static void i2c_start_next_msg(FAR struct sam_i2cdev_s *priv)
 static void i2c_hw_reinit(FAR struct sam_i2cdev_s *priv)
 {
   uintptr_t base = priv->base;
+  uint32_t ctrla;
+
+  ARM_DSB();
+
+  /* Disable SERCOM5 before SWRST. Writing SWRST while ENABLE=1 simultaneously
+   * de-asserts ENABLE, triggering SYNCBUSY.ENABLE alongside SYNCBUSY.SWRST.
+   * On CA90 this combination returns AXI SLVERR → IMPRECISERR → HardFault. */
+
+  ctrla = getreg32(base + SAM_I2C_CTRLA_OFFSET);
+  if (ctrla & I2C_CTRLA_ENABLE)
+    {
+      putreg32(ctrla & ~I2C_CTRLA_ENABLE, base + SAM_I2C_CTRLA_OFFSET);
+      i2c_wait_syncbusy(base);
+    }
 
   putreg32(I2C_CTRLA_SWRST, base + SAM_I2C_CTRLA_OFFSET);
   i2c_wait_syncbusy(base);
+
+  /* Bus recovery: SWRST kills SCL output; a slave mid-byte holds SDA low
+   * indefinitely.  Clock out stuck slaves and generate STOP before re-init. */
+
+  i2c_bus_recover();
+  sam_portconfig(PORT_SERCOM5_PAD0);
+  sam_portconfig(PORT_SERCOM5_PAD1);
+
+  /* Re-enable input buffers after portconfig (portconfig clears INEN).
+   * Both SDA and SCL need INEN: SDA for physical bus state reads via PORT_IN,
+   * SCL for clock-stretch detection. */
+
+  putreg8(getreg8(I2C5_PORT_BASE + SAM_PORT_PINCFG_OFFSET(I2C5_SDA_PIN))
+          | PORT_PINCFG_INEN,
+          I2C5_PORT_BASE + SAM_PORT_PINCFG_OFFSET(I2C5_SDA_PIN));
+  putreg8(getreg8(I2C5_PORT_BASE + SAM_PORT_PINCFG_OFFSET(I2C5_SCL_PIN))
+          | PORT_PINCFG_INEN,
+          I2C5_PORT_BASE + SAM_PORT_PINCFG_OFFSET(I2C5_SCL_PIN));
 
   putreg32(I2C_CTRLB_SMEN, base + SAM_I2C_CTRLB_OFFSET);
   i2c_wait_syncbusy(base);
@@ -397,7 +431,14 @@ static int i2c_interrupt(int irq, FAR void *context, FAR void *arg)
     {
       putreg8(I2C_INT_ALL, base + SAM_I2C_INTENCLR_OFFSET);
       putreg8(I2C_INT_ALL, base + SAM_I2C_INTFLAG_OFFSET);
+      uint32_t ctrla_r = getreg32(base + SAM_I2C_CTRLA_OFFSET);
+      if (ctrla_r & I2C_CTRLA_ENABLE)
+        {
+          putreg32(ctrla_r & ~I2C_CTRLA_ENABLE, base + SAM_I2C_CTRLA_OFFSET);
+          i2c_wait_syncbusy(base);
+        }
       putreg32(I2C_CTRLA_SWRST, base + SAM_I2C_CTRLA_OFFSET);
+      i2c_wait_syncbusy(base);
       priv->frequency = 0;
       i2c_wakeup(priv, -EIO);
       return OK;
@@ -451,15 +492,9 @@ static int i2c_interrupt(int irq, FAR void *context, FAR void *arg)
 
       if (priv->is_read)
         {
-          /* Read-address phase ACKed (MB fires after addr+R sent).
-           * MUST clear INTFLAG[0] to release SCL hold — CA90 hardware
-           * holds SCL LOW while INTFLAG.MB is set.  Clearing it allows
-           * the master to clock in the data byte, which fires SB.
-           *
-           * NOTE: On CA90 with SMEN=1, MB does NOT fire for read-address
-           * ACK — hardware goes directly to SB (first byte received).
-           * This block is dead code but kept for documentation/safety.
-           * DMA is started from i2c_start_next_msg() instead. */
+          /* Read-address phase ACKed. With SMEN=1, MB does NOT fire for
+           * read-address on CA90 — hardware goes directly to SB.
+           * Dead code but kept for safety. */
 
           putreg8(I2C_INT_MB, base + SAM_I2C_INTFLAG_OFFSET);
           return OK;
@@ -531,7 +566,9 @@ static int i2c_interrupt(int irq, FAR void *context, FAR void *arg)
 
       i2c_wait_syncbusy(base);
 
-      /* Read DATA — for non-last bytes SMEN auto-ACK starts next byte */
+      /* Read DATA — SMEN=1: reading DATA auto-clears SB and auto-ACKs
+       * non-last bytes (ACKACT=0 default). Last byte already set ACKACT=1
+       * and CMD_STOP above before this read. */
 
       priv->msg->buffer[priv->xfrd++] =
           (uint8_t)(getreg32(base + SAM_I2C_DATA_OFFSET) & 0xFF);
@@ -615,15 +652,34 @@ static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
 
         if (busstate == I2C_STATUS_BUSSTATE_OWNER)
           {
-            putreg8(I2C_INT_ALL, base + SAM_I2C_INTFLAG_OFFSET);
-            putreg16(I2C_STATUS_BUSSTATE_IDLE,
-                     base + SAM_I2C_STATUS_OFFSET);
-            i2c_wait_syncbusy(base);
+            /* A STOP from the previous NACK handler may still be in
+             * progress (CMD=STOP SYNCBUSY clears before STOP completes
+             * on the physical bus at 400 kHz).  Wait for natural IDLE
+             * (≤2 µs for STOP at 400 kHz) before forcing.  Force-IDLE
+             * while STOP is in progress aborts the STOP, leaving BMP388
+             * confused: BMP388 never sees STOP, stays in a bad state,
+             * NACKs the next address byte, and on CA90 SERCOM with
+             * SMEN=1 MB does not fire after write-address NACK →
+             * perpetual 50ms timeout. */
+
+            volatile uint32_t wait_idle = 30000u;  /* ~300µs at 300MHz */
+            while (--wait_idle &&
+                   ((getreg16(base + SAM_I2C_STATUS_OFFSET) &
+                     I2C_STATUS_BUSSTATE_MASK) != I2C_STATUS_BUSSTATE_IDLE));
+            if (!wait_idle)
+              {
+                /* Genuinely stuck OWNER >300µs — force IDLE as last resort */
+                putreg8(I2C_INT_ALL, base + SAM_I2C_INTFLAG_OFFSET);
+                putreg16(I2C_STATUS_BUSSTATE_IDLE,
+                         base + SAM_I2C_STATUS_OFFSET);
+                i2c_wait_syncbusy(base);
+              }
             break;
           }
 
         if (--guard == 0)
           {
+            i2c_hw_reinit(priv);
             nxmutex_unlock(&priv->lock);
             return -EBUSY;
           }
@@ -697,11 +753,25 @@ static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
         }
 #endif
 
-      static uint32_t tmo_count = 0;
-      if (++tmo_count <= 5)
+      uint16_t _st = getreg16(base + SAM_I2C_STATUS_OFFSET);
+
+      /* RXNACK=1: CA90 SMEN=1 prevents MB from firing after address NACK,
+       * so the ISR never sent CMD=STOP.  Send it now so BMP388 sees a clean
+       * STOP before reinit — otherwise BMP388 stays confused and NACKs the
+       * next address, perpetuating the 50ms timeout loop. */
+
+      if (_st & I2C_STATUS_RXNACK)
         {
-          _alert("I2C5 timeout #%lu (xfrd=%d)\n",
-                 (unsigned long)tmo_count, priv->xfrd);
+          uint32_t ctrlb = getreg32(base + SAM_I2C_CTRLB_OFFSET);
+          ctrlb &= ~I2C_CTRLB_CMD_MASK;
+          ctrlb |= I2C_CTRLB_CMD_STOP;
+          putreg32(ctrlb, base + SAM_I2C_CTRLB_OFFSET);
+          i2c_wait_syncbusy(base);
+
+          volatile uint32_t wait_stop = 3000u;  /* ~10 µs at 300 MHz */
+          while (--wait_stop &&
+                 ((getreg16(base + SAM_I2C_STATUS_OFFSET) &
+                   I2C_STATUS_BUSSTATE_MASK) != I2C_STATUS_BUSSTATE_IDLE));
         }
 
       i2c_hw_reinit(priv);
@@ -712,6 +782,14 @@ static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
 
   if (priv->result < 0)
     {
+      /* Runaway ISR protection did SWRST (priv->frequency reset to 0).
+       * Must reinit SERCOM before next transfer or it stays broken. */
+
+      if (priv->frequency == 0)
+        {
+          i2c_hw_reinit(priv);
+        }
+
       nxmutex_unlock(&priv->lock);
       return priv->result;
     }
@@ -778,12 +856,18 @@ FAR struct i2c_master_s *sam_i2cbus_initialize(int port)
   sam_portconfig(PORT_SERCOM5_PAD0);
   sam_portconfig(PORT_SERCOM5_PAD1);
 
+  /* Enable SCL input buffer so sam_i2c_transfer can read physical SCL level */
+
+  putreg8(getreg8(I2C5_PORT_BASE + SAM_PORT_PINCFG_OFFSET(I2C5_SCL_PIN))
+          | PORT_PINCFG_INEN,
+          I2C5_PORT_BASE + SAM_PORT_PINCFG_OFFSET(I2C5_SCL_PIN));
+
   /* 4. Software reset */
 
   putreg32(I2C_CTRLA_SWRST, base + SAM_I2C_CTRLA_OFFSET);
   i2c_wait_syncbusy(base);
 
-  /* 5. CTRLB: Smart mode enabled */
+  /* 5. CTRLB: SMEN=1 — reading DATA auto-ACKs non-last bytes */
 
   putreg32(I2C_CTRLB_SMEN, base + SAM_I2C_CTRLB_OFFSET);
   i2c_wait_syncbusy(base);

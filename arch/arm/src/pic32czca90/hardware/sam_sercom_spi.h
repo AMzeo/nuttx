@@ -78,6 +78,35 @@
 #define SPI_CTRLB_AMODE_MASK      (0x3u << SPI_CTRLB_AMODE_SHIFT)
 #define SPI_CTRLB_RXEN            (1u << 17)
 
+/* CA90-specific: FIFOCLR [23:22] — write-only, clears TX/RX FIFOs */
+
+#define SPI_CTRLB_FIFOCLR_SHIFT   22
+#define SPI_CTRLB_FIFOCLR_MASK    (0x3u << SPI_CTRLB_FIFOCLR_SHIFT)
+#define SPI_CTRLB_FIFOCLR_NONE    (0x0u << SPI_CTRLB_FIFOCLR_SHIFT)
+#define SPI_CTRLB_FIFOCLR_TXFIFO  (0x1u << SPI_CTRLB_FIFOCLR_SHIFT)
+#define SPI_CTRLB_FIFOCLR_RXFIFO  (0x2u << SPI_CTRLB_FIFOCLR_SHIFT)
+#define SPI_CTRLB_FIFOCLR_BOTH    (0x3u << SPI_CTRLB_FIFOCLR_SHIFT)
+
+/****************************************************************************
+ * CTRLC — Control C (offset 0x08, R/W 32-bit)
+ * CA90-specific: FIFO enable and threshold control (absent in SAMD5x)
+ * RESETVALUE = 0x00 — FIFO disabled by default
+ ****************************************************************************/
+
+#define SPI_CTRLC_FIFOEN          (1u << 27)    /* Enable TX/RX FIFOs */
+
+#define SPI_CTRLC_RXTRHOLD_SHIFT  28
+#define SPI_CTRLC_RXTRHOLD_MASK   (0x3u << SPI_CTRLC_RXTRHOLD_SHIFT)
+#define SPI_CTRLC_RXTRHOLD_DEFAULT (0x0u << SPI_CTRLC_RXTRHOLD_SHIFT)  /* RXC/DMA on any byte */
+#define SPI_CTRLC_RXTRHOLD_HALF   (0x1u << SPI_CTRLC_RXTRHOLD_SHIFT)   /* RXC/DMA on FIFO half-full */
+#define SPI_CTRLC_RXTRHOLD_FULL   (0x2u << SPI_CTRLC_RXTRHOLD_SHIFT)   /* RXC/DMA on FIFO full */
+
+#define SPI_CTRLC_TXTRHOLD_SHIFT  30
+#define SPI_CTRLC_TXTRHOLD_MASK   (0x3u << SPI_CTRLC_TXTRHOLD_SHIFT)
+#define SPI_CTRLC_TXTRHOLD_DEFAULT (0x0u << SPI_CTRLC_TXTRHOLD_SHIFT)  /* DRE/DMA when any space */
+#define SPI_CTRLC_TXTRHOLD_HALF   (0x1u << SPI_CTRLC_TXTRHOLD_SHIFT)   /* DRE/DMA on FIFO half-empty */
+#define SPI_CTRLC_TXTRHOLD_EMPTY  (0x2u << SPI_CTRLC_TXTRHOLD_SHIFT)   /* DRE/DMA on FIFO empty */
+
 /****************************************************************************
  * BAUD — Baud Rate (offset 0x0C, R/W 8-bit)
  *

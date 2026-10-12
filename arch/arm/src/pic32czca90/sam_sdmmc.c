@@ -35,12 +35,9 @@
  * Remove after diagnosis is complete. */
 #define SDMMC0_DEBUG_BYPASS_DATCRC  0
 
-/* SDMMC1 diagnostic: set to 1 to drive the on-board SD socket (SDMMC1,
- * PC30/PG00-03) instead of EXT-header wires (SDMMC0, PC08-PC15).
- * Isolates CA90 SDMMC IP 4-bit behaviour from EXT-header wiring.
- * Requires CONFIG_PIC32CZCA90_SQI1 disabled (shared pins).
- * Revert to 0 after the test. */
-#define SDMMC_TEST_USE_SDMMC1  0
+/* SDMMC_TEST_USE_SDMMC1 is defined in sam_sdmmc.h — include it here so
+ * the macro override block below sees it before the NuttX headers. */
+#include "sam_sdmmc.h"
 
 #if SDMMC_TEST_USE_SDMMC1
 #  define SAM_SDMMC_BASE          SAM_SDMMC1_BASE
@@ -926,7 +923,7 @@ static void sam_reset(struct sdio_dev_s *dev)
   unsigned long timeout_ms;
   uint8_t hc1;
 
-  sdmmc0_clk_enable();
+  sdmmc_clk_enable();
 
   /* Disable all interrupt signals before reset */
 
@@ -1348,7 +1345,7 @@ static int sam_sendcmd(struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
       {
         mcinfo("CMD%u data: TMR=%08" PRIx32 " NISIER=%04" PRIx32
                " EISIER=%04" PRIx32 " ASAR=%08" PRIx32 " HC1=%02x\n",
-               (regval >> 24) & 0x3fu, regval,
+               (unsigned)((regval >> 24) & 0x3fu), regval,
                (uint32_t)sam_getreg16(priv, SAM_SDMMC_NISIER_OFFSET),
                (uint32_t)sam_getreg16(priv, SAM_SDMMC_EISIER_OFFSET),
                sam_getreg(priv, SAM_SDMMC_ASAR_OFFSET),
@@ -1494,9 +1491,18 @@ static int sam_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
       nistr = sam_getreg(priv, SAM_SDMMC_NISTR_OFFSET);
       if ((nistr & SDMMC_RESPERR_INTS) != 0)
         {
-          mcerr("CMD%d error NISTR=%08" PRIx32 " PSR=%08" PRIx32 "\n",
-                (int)((cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT),
-                nistr, sam_getreg(priv, SAM_SDMMC_PSR_OFFSET));
+          int cmdidx = (int)((cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT);
+          if (cmdidx == 1)
+            {
+              /* CMD1 (MMC init) always fails for SD cards — expected probe step */
+              mcinfo("CMD1 error NISTR=%08" PRIx32 " PSR=%08" PRIx32 "\n",
+                     nistr, sam_getreg(priv, SAM_SDMMC_PSR_OFFSET));
+            }
+          else
+            {
+              mcerr("CMD%d error NISTR=%08" PRIx32 " PSR=%08" PRIx32 "\n",
+                    cmdidx, nistr, sam_getreg(priv, SAM_SDMMC_PSR_OFFSET));
+            }
           ret = -EIO;
           break;
         }
@@ -1744,16 +1750,16 @@ static sdio_eventset_t sam_eventwait(struct sdio_dev_s *dev)
     else if ((wkupevent & SDIOWAIT_ERROR) != 0)
       {
         uint32_t dat = (priv->last_psr_err >> 20) & 0xfu;
-        printf("SDMMC err: EISTR=%04" PRIx32 " NISTR=%08" PRIx32
-               " PSR=%08" PRIx32 " DAT[3:0]=%x (D3=%u D2=%u D1=%u D0=%u)"
-               " HC1=%02x ADMAES=%02x\n",
-               (uint32_t)priv->last_eistr,
-               (uint32_t)priv->last_nistr,
-               priv->last_psr_err, (unsigned)dat,
-               (unsigned)((dat>>3)&1), (unsigned)((dat>>2)&1),
-               (unsigned)((dat>>1)&1), (unsigned)(dat&1),
-               (unsigned)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET),
-               (unsigned)sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET));
+        mcerr("SDMMC err: EISTR=%04" PRIx32 " NISTR=%08" PRIx32
+              " PSR=%08" PRIx32 " DAT[3:0]=%x (D3=%u D2=%u D1=%u D0=%u)"
+              " HC1=%02x ADMAES=%02x\n",
+              (uint32_t)priv->last_eistr,
+              (uint32_t)priv->last_nistr,
+              priv->last_psr_err, (unsigned)dat,
+              (unsigned)((dat>>3)&1), (unsigned)((dat>>2)&1),
+              (unsigned)((dat>>1)&1), (unsigned)(dat&1),
+              (unsigned)sam_getreg8(priv, SAM_SDMMC_HC1R_OFFSET),
+              (unsigned)sam_getreg8(priv, SAM_SDMMC_AESR_OFFSET));
 
         /* Dump first 32 bytes of DMA receive buffer.
          * ADMA2 writes data byte-by-byte as received; CRC check is at end.
@@ -1763,12 +1769,14 @@ static sdio_eventset_t sam_eventwait(struct sdio_dev_s *dev)
         if (priv->buffer != NULL)
           {
             const uint8_t *b = (const uint8_t *)priv->buffer;
-            printf("SDMMC rxbuf[0..31]:");
-            for (int _i = 0; _i < 32; _i++)
+            char _rxhex[128];
+            int _n = 0;
+            for (int _i = 0; _i < 32 && _n < (int)sizeof(_rxhex) - 4; _i++)
               {
-                printf(" %02x", b[_i]);
+                _n += snprintf(_rxhex + _n, sizeof(_rxhex) - _n,
+                               " %02x", b[_i]);
               }
-            printf("\n");
+            mcerr("SDMMC rxbuf[0..31]:%s\n", _rxhex);
           }
       }
   }
@@ -2031,7 +2039,7 @@ static int sam_set_clock(struct sam_dev_s *priv, uint32_t clock)
   if (baseclk == 0u)
     {
       /* CA0R.BASECLKF=0 means "use another method" (DFP: BASECLKF_OTHER).
-       * Use the actual GCLK4 frequency programmed in sdmmc0_clk_enable(). */
+       * Use the actual GCLK4 frequency programmed in sdmmc_clk_enable(). */
       baseclk = SDMMC0_BASE_CLOCK_FREQUENCY;
     }
   else
@@ -2179,7 +2187,7 @@ static int sam_set_interrupts(struct sam_dev_s *priv)
  * SDMMC0, plus MCLK AHB (ID=69) and APB (ID=70) gates.
  ****************************************************************************/
 
-void sdmmc0_clk_enable(void)
+void sdmmc_clk_enable(void)
 {
   uint32_t id;
   uint32_t reg;
@@ -2234,14 +2242,14 @@ void sdmmc0_clk_enable(void)
 }
 
 /****************************************************************************
- * Public Function: sam_sdmmc0_initialize
+ * Public Function: sam_sdmmc_initialize
  *
  * Called from board_app_initialize() after shared pins are muxed to SDMMC0
  * function (mux I = 8). Returns the sdio_dev_s pointer to pass to
  * mmcsd_slotinitialize().
  ****************************************************************************/
 
-struct sdio_dev_s *sam_sdmmc0_initialize(void)
+struct sdio_dev_s *sam_sdmmc_initialize(void)
 {
   struct sam_dev_s *priv = &g_sdmmcdev;
 
@@ -2269,7 +2277,7 @@ struct sdio_dev_s *sam_sdmmc0_initialize(void)
   priv->sw_cd_gpio  = 0;   /* use hardware PSR.CARDINS, not GPIO read */
   priv->cd_invert   = 0;
 
-  sdmmc0_clk_enable();
+  sdmmc_clk_enable();
 
   /* Wait for GCLK4/GCLK5/MCLK gates to propagate before accessing SDMMC
    * registers.  Also forces arm_udelay.o to be co-linked from libarch.a:
@@ -2364,7 +2372,7 @@ void sam_sdmmc_set_sdio_card_isr(struct sdio_dev_s *dev,
 }
 
 /****************************************************************************
- * Public Function: sam_sdmmc0_slotinitialize
+ * Public Function: sam_sdmmc_slotinitialize
  *
  * Combined init + mmcsd_slotinitialize wrapper following SAMV7 chip-layer
  * pattern (arch/arm/src/samv7/sam_hsmci.c).
@@ -2377,12 +2385,12 @@ void sam_sdmmc_set_sdio_card_isr(struct sdio_dev_s *dev,
  * re-scanned after the group closes.
  ****************************************************************************/
 
-int sam_sdmmc0_slotinitialize(int minor)
+int sam_sdmmc_slotinitialize(int minor)
 {
-  struct sdio_dev_s *sdio = sam_sdmmc0_initialize();
+  struct sdio_dev_s *sdio = sam_sdmmc_initialize();
   if (sdio == NULL)
     {
-      syslog(LOG_ERR, "sam_sdmmc0_slotinitialize: hw init failed\n");
+      syslog(LOG_ERR, "sam_sdmmc_slotinitialize: hw init failed\n");
       return -ENODEV;
     }
 

@@ -71,8 +71,8 @@
 #define I2C_CTRLB_CMD_SHIFT       16
 #define I2C_CTRLB_CMD_MASK        (0x3u << I2C_CTRLB_CMD_SHIFT)
 #define I2C_CTRLB_CMD_NOP         (0x0u << I2C_CTRLB_CMD_SHIFT)
-#define I2C_CTRLB_CMD_BYTERD      (0x1u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + read next byte */
-#define I2C_CTRLB_CMD_RESTART     (0x2u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + repeated start */
+#define I2C_CTRLB_CMD_RESTART     (0x1u << I2C_CTRLB_CMD_SHIFT)  /* DS60001749 Table 35-65: ACK + repeated Start */
+#define I2C_CTRLB_CMD_BYTERD      (0x2u << I2C_CTRLB_CMD_SHIFT)  /* DS60001749 Table 35-65: ACK + byte read (Read mode only) */
 #define I2C_CTRLB_CMD_STOP        (0x3u << I2C_CTRLB_CMD_SHIFT)  /* Execute ACK/NACK + stop */
 
 #define I2C_CTRLB_ACKACT          (1u << 18)  /* 0=ACK, 1=NACK on next read */

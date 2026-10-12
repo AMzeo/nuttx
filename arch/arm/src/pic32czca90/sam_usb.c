@@ -368,11 +368,10 @@ static void sam_fifo_write(uint8_t epno, const uint8_t *buf, uint16_t len)
 
 static void sam_fifo_read(uint8_t epno, uint8_t *buf, uint16_t len)
 {
-  /* Harmony byte-lane model: FIFO is a 4-byte window; lane N = byte N of
-   * current word.  Word advances only after lane 3 is read.  Use (i & 3U)
-   * to cycle lanes 0-1-2-3-0-1-2-3, matching USBHS_DeviceEPFIFOUnload_Default.
-   * A plain *fifo8 loop (always lane 0) never advances past byte 0, corrupting
-   * bytes 33-34 of 35-byte packets (PARAM_SET CRC) ~99.6% of the time.
+  /* MUSB FIFO is a 4-byte window; lane N = byte N of the current word.
+   * The word advances only after lane 3 is read.  Use (i & 3U) to cycle
+   * lanes 0-1-2-3-0-1-2-3.  A plain *fifo8 loop always reads lane 0,
+   * corrupting bytes 3,7,11,... of every packet (PARAM_SET CRC ~99.6%).
    */
 
   volatile uint8_t *fifo = (volatile uint8_t *)SAM_USBHS0_FIFO(epno);
@@ -492,9 +491,7 @@ static void sam_ep0_tx(struct sam_usbdev_s *priv)
 
   if (privreq->req.xfrd >= privreq->req.len || nbytes < EP0_MAXPACKET)
     {
-      /* Last packet — set TXPKTRDY + DATAEND.
-       * Harmony: 0x0A for last data packet in D2H transfer.
-       */
+      /* Last packet — set TXPKTRDY + DATAEND (0x0A). */
 
       sam_putreg8(USBHS_CSR0L_TXPKTRDY | USBHS_CSR0L_DATAEND,
                   SAM_USBHS0_CSR0L);
@@ -502,7 +499,7 @@ static void sam_ep0_tx(struct sam_usbdev_s *priv)
     }
   else
     {
-      /* Multi-packet: TXPKTRDY only (Harmony: 0x02) */
+      /* Multi-packet: TXPKTRDY only (0x02) */
 
       sam_putreg8(USBHS_CSR0L_TXPKTRDY, SAM_USBHS0_CSR0L);
       priv->ep0state = EP0_STATE_TX;
@@ -736,9 +733,7 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
 
   ep0_trace(priv, T_ENTER, csr0l, priv->ep0state, 0);
 
-  /* Step 1: Handle SENTSTALL — clear it and reset EP0 state.
-   * (Harmony: drv_usbhs_device.c line ~2870)
-   */
+  /* Step 1: Handle SENTSTALL — clear it and reset EP0 state. */
 
   if (csr0l & USBHS_CSR0L_SENTSTALL)
     {
@@ -751,7 +746,6 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
 
   /* Step 2: Handle SETUPEND — host aborted the previous transfer.
    * Write SVCSETUPEND to clear it, reset state.
-   * (Harmony: line ~2880)
    */
 
   if (csr0l & USBHS_CSR0L_SETUPEND)
@@ -769,7 +763,6 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
   /* Step 2b: If RXPKTRDY arrives while we're in any TX state, the host
    * has aborted the current transfer and sent a new SETUP. Reset to IDLE
    * so the SETUP processing below handles it.
-   * (Harmony: lines 2909-2917 — reset EP0 state on RXPKTRDY in TX states)
    */
 
   if ((csr0l & USBHS_CSR0L_RXPKTRDY) &&
@@ -782,7 +775,6 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
 
   /* Step 3: TX data stage in progress — TXPKTRDY cleared means the host
    * ACKed our IN data. Load next chunk or finish.
-   * (Harmony: TX_DATA_STAGE_IN_PROGRESS handling, line ~3050)
    */
 
   if (priv->ep0state == EP0_STATE_TX &&
@@ -870,9 +862,7 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
       return;
     }
 
-  /* Step 4: RXPKTRDY — SETUP or OUT data received.
-   * (Harmony: line ~2900)
-   */
+  /* Step 4: RXPKTRDY — SETUP or OUT data received. */
 
   if (csr0l & USBHS_CSR0L_RXPKTRDY)
     {
@@ -900,8 +890,7 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
 
           if ((reqtype & USB_REQ_DIR_MASK) == USB_REQ_DIR_IN && wlength > 0)
             {
-              /* Device-to-host with data stage (e.g. GET_DESCRIPTOR).
-               * Harmony pattern:
+              /* Device-to-host with data stage (e.g. GET_DESCRIPTOR):
                *   1) Write SVCRXPKTRDY (0x40) to clear SETUP
                *   2) Load FIFO with response data
                *   3) Write TXPKTRDY|DATAEND (0x0A) if last packet,
@@ -928,10 +917,8 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
             {
               /* No-data control transfer (H2D): SET_ADDRESS, SET_CONFIG, etc.
                *
-               * SET_ADDRESS is handled directly here (Harmony line ~2991):
-               *   Write SVCRXPKTRDY|DATAEND (0x48) — MUSB sends ZLP status
-               *   automatically. Then set FADDR immediately (MUSB latches it
-               *   after the status phase completes on wire).
+               * SET_ADDRESS: write SVCRXPKTRDY|DATAEND (0x48) — MUSB sends
+               * ZLP status automatically, then apply FADDR after status phase.
                *
                * All other no-data requests go to CLASS_SETUP. The NuttX class
                * driver submits a zero-length EP0 IN request for the status
@@ -945,10 +932,9 @@ static void sam_ep0_interrupt(struct sam_usbdev_s *priv)
                               SAM_USBHS0_CSR0L);
 
                   /* Defer FADDR write until status phase completes.
-                   * Harmony pattern: write 0x48, wait for next EP0 ISR
-                   * (status ZLP sent at old address), then set FADDR.
-                   * Writing FADDR immediately causes the ZLP to go out
-                   * at the NEW address — host rejects it.
+                   * The 0x48 write causes the ZLP to go out at the OLD
+                   * address; writing FADDR immediately would send the ZLP
+                   * at the new address and the host would reject it.
                    */
 
                   priv->newaddr = wvalue & 0x7f;
@@ -1849,9 +1835,9 @@ static int sam_pullup(struct usbdev_s *dev, bool enable)
 
 static void sam_hw_setup(struct sam_usbdev_s *priv)
 {
-  /* No SWRST — Harmony's SWRST template writes to wrong address (base+0x2000
-   * instead of base+0x0000) so it effectively never resets. Matching that
-   * behavior: skip SWRST, go directly to device mode configuration.
+  /* No SWRST — the USBHS SWRST register is at base+0x0000 but the DFP
+   * template targets base+0x2000 (wrong offset) so it never fires.
+   * Skip SWRST and go directly to device mode configuration.
    */
 
   /* Force device mode: disable → set IDOVEN+IDVAL → re-enable */
@@ -1905,8 +1891,7 @@ static void sam_hw_setup(struct sam_usbdev_s *priv)
               SAM_USBHS0_POWER);
 
   /* EP0 FIFO is hardwired (64 bytes at address 0) — no configuration
-   * needed. Harmony confirms: "EP0 does not require any configuration."
-   * EP1-7 FIFOs are allocated dynamically in sam_ep_configure().
+   * needed. EP1-7 FIFOs are allocated dynamically in sam_ep_configure().
    */
 
   sam_putreg8(0, SAM_USBHS0_INDEX);

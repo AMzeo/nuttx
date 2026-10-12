@@ -9,6 +9,11 @@
 #ifndef __ARCH_ARM_SRC_PIC32CZCA90_SAM_SDMMC_H
 #define __ARCH_ARM_SRC_PIC32CZCA90_SAM_SDMMC_H
 
+/* Set to 1 to use SDMMC1 onboard J303 socket (PC30/PG00-03) instead of
+ * SDMMC0 EXT-header wires (PC08-PC15).  Requires SQI1 disabled (shared pins).
+ * Revert to 0 for production PCB where SDMMC0 connects directly to SD socket. */
+#define SDMMC_TEST_USE_SDMMC1  1
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -30,7 +35,7 @@ extern "C"
 #endif
 
 /****************************************************************************
- * Name: sam_sdmmc0_initialize
+ * Name: sam_sdmmc_initialize
  *
  * Description:
  *   Initialize SDMMC0 for SD card access.  Enables GCLK4 (100 MHz main
@@ -42,14 +47,14 @@ extern "C"
  *
  ****************************************************************************/
 
-EXTERN struct sdio_dev_s *sam_sdmmc0_initialize(void);
+EXTERN struct sdio_dev_s *sam_sdmmc_initialize(void);
 
 /****************************************************************************
- * Name: sam_sdmmc0_slotinitialize
+ * Name: sam_sdmmc_slotinitialize
  *
  * Description:
  *   Combined SDMMC0 hardware init + mmcsd_slotinitialize().  Call this from
- *   board_app_initialize() instead of sam_sdmmc0_initialize()+mmcsd_slotinitialize()
+ *   board_app_initialize() instead of sam_sdmmc_initialize()+mmcsd_slotinitialize()
  *   separately.
  *
  * Returned Value:
@@ -57,19 +62,19 @@ EXTERN struct sdio_dev_s *sam_sdmmc0_initialize(void);
  *
  ****************************************************************************/
 
-EXTERN int sam_sdmmc0_slotinitialize(int minor);
+EXTERN int sam_sdmmc_slotinitialize(int minor);
 
 /****************************************************************************
- * Name: sdmmc0_clk_enable
+ * Name: sdmmc_clk_enable
  *
  * Description:
  *   Enable GCLK4 / GCLK5 and MCLK AHB / APB gates for SDMMC0.
- *   Called from sam_sdmmc0_initialize(); may also be called after a
+ *   Called from sam_sdmmc_initialize(); may also be called after a
  *   deep-sleep resume to re-enable clocks before the first transfer.
  *
  ****************************************************************************/
 
-EXTERN void sdmmc0_clk_enable(void);
+EXTERN void sdmmc_clk_enable(void);
 
 /****************************************************************************
  * Name: sam_sdmmc_set_sdio_card_isr

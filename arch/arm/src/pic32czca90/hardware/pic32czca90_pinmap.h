@@ -82,7 +82,8 @@
 #define PORT_SERCOM4_PAD0   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(21) | \
                              PORT_FLAG_PMUXEN)                /* PC21 EXT2 */
 #define PORT_SERCOM4_PAD1   (PORT_PORTC | PORT_FUNC(3) | PORT_PIN(22) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN) /* PC22 EXT2 */
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN | \
+                             PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH) /* PC22 EXT2, pull-up for NPN collector idle */
 
 /* =========================================================================
  * SERCOM0 – PC00(PAD0)/PC01(PAD1), function D
@@ -150,13 +151,14 @@
  */
 
 #define PORT_SERCOM8_PAD0   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(24) | \
-                             PORT_FLAG_PMUXEN)                          /* PD24 MOSI */
+                             PORT_FLAG_PMUXEN | PORT_FLAG_DRVSTR)      /* PD24 MOSI */
 #define PORT_SERCOM8_PAD1   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(25) | \
-                             PORT_FLAG_PMUXEN)                          /* PD25 SCK */
+                             PORT_FLAG_PMUXEN | PORT_FLAG_DRVSTR)      /* PD25 SCK */
 #define PORT_SERCOM8_PAD2   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(26) | \
                              PORT_FLAG_PMUXEN)                          /* PD26 SS */
 #define PORT_SERCOM8_PAD3   (PORT_PORTD | PORT_FUNC(3) | PORT_PIN(27) | \
-                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN)        /* PD27 MISO */
+                             PORT_FLAG_PMUXEN | PORT_FLAG_INEN       | \
+                             PORT_FLAG_PULLEN | PORT_FLAG_OUTVAL_HIGH) /* PD27 MISO pull-up */
 
 /* =========================================================================
  * SERCOM9 SPI — PD28(MOSI/PAD0), PD29(SCK/PAD1), PE04(SS/PAD2), PE05(MISO/PAD3)
